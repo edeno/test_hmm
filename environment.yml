@@ -1,0 +1,24 @@
+name: test_hmm
+channels:
+- defaults
+- conda-forge
+dependencies:
+- "python>=3.8"
+- hmmlearn
+- numpy
+- scipy
+- scikit-learn
+- matplotlib
+- xarray
+- pandas
+- seaborn
+- tqdm
+- jupyter
+- jupyterlab
+- nb_conda
+- setuptools
+- flake8
+- pytest
+- pytest-cov
+- coveralls
+- black
