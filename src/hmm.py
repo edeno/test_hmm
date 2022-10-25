@@ -40,8 +40,6 @@ def correction_smoothing(causal_posterior, transition_matrix):
             / (transition_matrix.T @ causal_posterior[time_ind] + np.spacing(1)),
             axis=1,
         )
-        acausal_posterior[time_ind] /= acausal_posterior[time_ind].sum()
-
     return acausal_posterior
 
 
@@ -74,3 +72,54 @@ def get_acausal_posterior_from_parallel_smoothing(causal_posterior, backward_pos
     acausal_posterior /= acausal_posterior.sum(axis=1, keepdims=True)
 
     return acausal_posterior
+
+
+def update_transition_matrix_from_parallel_smoothing(
+    causal_posterior,
+    backward_posterior,
+    likelihood,
+    transition_matrix,
+    data_log_likelihood,
+):
+
+    n_states = causal_posterior.shape[1]
+    new_transition_matrix = np.empty((n_states, n_states))
+
+    for from_state in range(n_states):
+        for to_state in range(n_states):
+            new_transition_matrix[from_state, to_state] = np.sum(
+                causal_posterior[:-1, from_state]
+                * likelihood[1:, to_state]
+                * backward_posterior[1:, to_state]
+                * transition_matrix[from_state, to_state]
+            )
+
+    new_transition_matrix /= np.exp(data_log_likelihood)
+
+    new_transition_matrix /= new_transition_matrix.sum(axis=1, keepdims=True)
+
+    return new_transition_matrix
+
+
+def update_transition_matrix_from_correction_smoothing(
+    causal_posterior,
+    acausal_posterior,
+    likelihood,
+    transition_matrix,
+):
+    n_states = causal_posterior.shape[1]
+    new_transition_matrix = np.empty((n_states, n_states))
+
+    for from_state in range(n_states):
+        for to_state in range(n_states):
+            new_transition_matrix[from_state, to_state] = np.sum(
+                causal_posterior[:-1, from_state]
+                * likelihood[1:, to_state]
+                * acausal_posterior[1:, to_state]
+                * transition_matrix[from_state, to_state]
+                / (causal_posterior[1:, to_state] + np.spacing(1))
+            )
+
+    new_transition_matrix /= new_transition_matrix.sum(axis=1, keepdims=True)
+
+    return new_transition_matrix
