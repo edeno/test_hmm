@@ -36,10 +36,11 @@ def correction_smoothing(causal_posterior: np.ndarray, transition_matrix: np.nda
     acausal_posterior[-1] = causal_posterior[-1].copy()
 
     for time_ind in range(n_time - 2, -1, -1):
-        acausal_posterior[time_ind] = causal_posterior[time_ind] * np.sum(
-            transition_matrix
+        numerator = transition_matrix * causal_posterior[time_ind][:, np.newaxis]
+        acausal_posterior[time_ind] = np.sum(
+            numerator
             * acausal_posterior[time_ind + 1]
-            / (causal_posterior[time_ind] @ transition_matrix + np.spacing(1)),
+            / (numerator.sum(axis=0) + np.spacing(1)),
             axis=1,
         )
     return acausal_posterior
