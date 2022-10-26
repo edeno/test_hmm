@@ -1,12 +1,14 @@
 import numpy as np
 
 
-def forward(initial_conditions, observations_ind, emission_matrix, transition_matrix):
+def get_likelihood(emission_matrix, observations_ind):
+    return emission_matrix[:, observations_ind].T
+
+
+def forward(initial_conditions, likelihood, transition_matrix):
 
     n_states = len(initial_conditions)
-    n_time = len(observations_ind)
-
-    likelihood = emission_matrix[:, observations_ind].T
+    n_time = len(likelihood)
 
     causal_posterior = np.zeros((n_time, n_states))
     causal_posterior[0] = initial_conditions * likelihood[0]
@@ -27,7 +29,7 @@ def forward(initial_conditions, observations_ind, emission_matrix, transition_ma
     return causal_posterior, data_log_likelihood, scaling
 
 
-def correction_smoothing(causal_posterior, transition_matrix):
+def correction_smoothing(causal_posterior: np.ndarray, transition_matrix: np.ndarray):
     n_time, n_states = causal_posterior.shape
 
     acausal_posterior = np.zeros((n_time, n_states))
@@ -43,32 +45,50 @@ def correction_smoothing(causal_posterior, transition_matrix):
     return acausal_posterior
 
 
-def parallel_smoothing(
-    initial_conditions,
-    observations_ind,
-    emission_matrix,
-    transition_matrix,
-    scaling,
-):
-    n_states = len(initial_conditions)
-    n_time = len(observations_ind)
-    backward_posterior = np.zeros((n_time, n_states))
-    backward_posterior[-1] = 1 / scaling[-1]
+def backward(
+    initial_conditions: np.ndarray,
+    likelihood: np.ndarray,
+    transition_matrix: np.ndarray,
+    scaling: np.ndarray,
+) -> np.ndarray:
+    """Calculates p(O_{t+1:T} \mid I_t) scaled by p(O_t \mid O_{1:t-1})
 
-    likelihood = emission_matrix[:, observations_ind].T
+    The scaling is from the causal forward algorithm, which keeps it numerically stable.
+    Scaling the backwards causal algorithm
+
+    Parameters
+    ----------
+    initial_conditions : np.ndarray, shape (n_states,)
+    observations_ind : np.ndarray, shape (n_time,)
+    emission_matrix : np.ndarray, shape (n_states, n_states)
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+    scaling : np.ndarray, shape (n_time,)
+
+    Returns
+    -------
+    scaled_backward_posterior : np.ndarray
+
+    """
+    n_states = len(initial_conditions)
+    n_time = len(likelihood)
+
+    scaled_backward_posterior = np.zeros((n_time, n_states))
+    scaled_backward_posterior[-1] = 1 / scaling[-1]
 
     for time_ind in range(n_time - 2, -1, -1):
-        backward_posterior[time_ind] = transition_matrix @ (
-            likelihood[time_ind + 1] * backward_posterior[time_ind + 1]
+        scaled_backward_posterior[time_ind] = transition_matrix @ (
+            likelihood[time_ind + 1] * scaled_backward_posterior[time_ind + 1]
         )
 
-        backward_posterior[time_ind] /= scaling[time_ind]
+        scaled_backward_posterior[time_ind] /= scaling[time_ind]
 
-    return backward_posterior
+    return scaled_backward_posterior
 
 
-def get_acausal_posterior_from_parallel_smoothing(causal_posterior, backward_posterior):
-    acausal_posterior = causal_posterior * backward_posterior
+def get_acausal_posterior_from_parallel_smoothing(
+    causal_posterior, scaled_backward_posterior
+):
+    acausal_posterior = causal_posterior * scaled_backward_posterior
     acausal_posterior /= acausal_posterior.sum(axis=1, keepdims=True)
 
     return acausal_posterior
@@ -76,7 +96,7 @@ def get_acausal_posterior_from_parallel_smoothing(causal_posterior, backward_pos
 
 def update_transition_matrix_from_parallel_smoothing(
     causal_posterior,
-    backward_posterior,
+    scaled_backward_posterior,
     likelihood,
     transition_matrix,
     data_log_likelihood,
@@ -90,7 +110,7 @@ def update_transition_matrix_from_parallel_smoothing(
             new_transition_matrix[from_state, to_state] = np.sum(
                 causal_posterior[:-1, from_state]
                 * likelihood[1:, to_state]
-                * backward_posterior[1:, to_state]
+                * scaled_backward_posterior[1:, to_state]
                 * transition_matrix[from_state, to_state]
             )
 
