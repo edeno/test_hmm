@@ -18,7 +18,7 @@ def forward(initial_conditions, likelihood, transition_matrix):
 
     for time_ind in range(1, n_time):
         causal_posterior[time_ind] = likelihood[time_ind] * (
-            transition_matrix.T @ causal_posterior[time_ind - 1]
+            causal_posterior[time_ind - 1] @ transition_matrix
         )
         scaling[time_ind] = causal_posterior[time_ind].sum()
         causal_posterior[time_ind] /= scaling[time_ind]
@@ -39,7 +39,7 @@ def correction_smoothing(causal_posterior: np.ndarray, transition_matrix: np.nda
         acausal_posterior[time_ind] = causal_posterior[time_ind] * np.sum(
             transition_matrix
             * acausal_posterior[time_ind + 1]
-            / (transition_matrix.T @ causal_posterior[time_ind] + np.spacing(1)),
+            / (causal_posterior[time_ind] @ transition_matrix + np.spacing(1)),
             axis=1,
         )
     return acausal_posterior
@@ -54,7 +54,7 @@ def backward(
     """Calculates p(O_{t+1:T} \mid I_t) scaled by p(O_t \mid O_{1:t-1})
 
     The scaling is from the causal forward algorithm, which keeps it numerically stable.
-    Scaling the backwards causal algorithm
+    Unlike the forward algorithm, the returned value is not not a probability due to the scaling.
 
     Parameters
     ----------
