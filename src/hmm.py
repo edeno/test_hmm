@@ -184,6 +184,6 @@ def estimate_transition_matrix_from_gradient_descent(
         method="BFGS",
     )
 
-    transition_matrix = reconstruct_transition(result.x)
+    transition_matrix = reconstruct_transition(result.x, n_states)
 
     return transition_matrix, result.success
