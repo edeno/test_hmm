@@ -1,4 +1,6 @@
 import numpy as np
+from scipy.optimize import minimize
+from scipy.special import logit, softmax
 
 
 def get_likelihood(emission_matrix, observations_ind):
@@ -144,3 +146,44 @@ def update_transition_matrix_from_correction_smoothing(
     new_transition_matrix /= new_transition_matrix.sum(axis=1, keepdims=True)
 
     return new_transition_matrix
+
+
+def reconstruct_transition(off_diagonal_elements, n_states):
+    """Takes logit transformed off-digaonal transition elements
+    and recreates the transition matrix"""
+
+    new_transition_matrix = np.zeros((n_states, n_states))
+    is_off_diagonal = ~np.identity(n_states, dtype=bool)
+    new_transition_matrix[is_off_diagonal] = off_diagonal_elements
+
+    return softmax(new_transition_matrix, axis=1)
+
+
+def negative_log_likelihood(params, initial_conditions, likelihood):
+    n_states = len(initial_conditions)
+    transition_matrix = reconstruct_transition(params, n_states)
+
+    _, data_log_likelihood, _ = forward(
+        initial_conditions, likelihood, transition_matrix
+    )
+
+    return -data_log_likelihood
+
+
+def estimate_transition_matrix_from_gradient_descent(
+    initial_conditions, likelihood, transition_matrix
+):
+    n_states = transition_matrix.shape[0]
+    is_off_diagonal = ~np.identity(n_states, dtype=bool)
+
+    x0 = logit(transition_matrix[is_off_diagonal])
+    result = minimize(
+        negative_log_likelihood,
+        x0=x0,
+        args=(initial_conditions, likelihood),
+        method="BFGS",
+    )
+
+    transition_matrix = reconstruct_transition(result.x)
+
+    return transition_matrix, result.success
