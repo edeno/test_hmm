@@ -9,6 +9,7 @@ from src.hmm import (
     get_likelihood,
     update_transition_matrix_from_correction_smoothing,
     update_transition_matrix_from_parallel_smoothing,
+    estimate_transition_matrix_from_gradient_descent,
 )
 
 
@@ -47,10 +48,15 @@ def compare_transition_matrix(use_parallel=True):
 
     model.fit(observations_ind[:, np.newaxis])
 
+    likelihood = get_likelihood(emission_matrix, observations_ind)
+
+    graident_transition_matrix, _ = estimate_transition_matrix_from_gradient_descent(
+        initial_conditions, likelihood, transition_matrix
+    )
+
     dll = []
 
     for _ in range(model.monitor_.iter):
-        likelihood = get_likelihood(emission_matrix, observations_ind)
 
         causal_posterior, data_log_likelihood, scaling = forward(
             initial_conditions, likelihood, transition_matrix
@@ -87,6 +93,7 @@ def compare_transition_matrix(use_parallel=True):
 
     print(model.transmat_)
     print(transition_matrix)
+    print(graident_transition_matrix)
     print(model.transmat_ - transition_matrix)
 
 
