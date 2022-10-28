@@ -131,27 +131,23 @@ def update_transition_matrix_from_correction_smoothing(
     transition_matrix,
 ):
     n_time, n_states = causal_posterior.shape
-    new_transition_matrix = np.empty((n_states, n_states))
+    xi = np.zeros((n_time - 1, n_states, n_states))
 
-    xi_correction = np.zeros((n_time - 1, n_states, n_states))
+    for from_state in range(n_states):
+        for to_state in range(n_states):
+            xi[:, from_state, to_state] = (
+                causal_posterior[:-1, from_state]
+                * likelihood[1:, to_state]
+                * acausal_posterior[1:, to_state]
+                * transition_matrix[from_state, to_state]
+                / (causal_posterior[1:, to_state] + np.spacing(1))
+            )
 
-    for time_ind in range(n_time - 1):
-        for from_state in range(n_states):
-            for to_state in range(n_states):
-                xi_correction[time_ind, from_state, to_state] = (
-                    causal_posterior[time_ind, from_state]
-                    * likelihood[time_ind + 1, to_state]
-                    * acausal_posterior[time_ind + 1, to_state]
-                    * transition_matrix[from_state, to_state]
-                    / (causal_posterior[time_ind + 1, to_state] + np.spacing(1))
-                )
-        xi_correction[time_ind] /= xi_correction[time_ind].sum()
+    xi = xi / xi.sum(axis=(1, 2), keepdims=True)
 
-    summed_xi_correction = xi_correction.sum(axis=0)
+    summed_xi = xi.sum(axis=0)
 
-    new_transition_matrix = summed_xi_correction / summed_xi_correction.sum(
-        axis=1, keepdims=True
-    )
+    new_transition_matrix = summed_xi / summed_xi.sum(axis=1, keepdims=True)
 
     return new_transition_matrix
 
