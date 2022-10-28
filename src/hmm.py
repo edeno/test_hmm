@@ -131,6 +131,8 @@ def update_transition_matrix_from_correction_smoothing(
     transition_matrix,
 ):
     n_time, n_states = causal_posterior.shape
+
+    # probability of state 1 in time t and state 2 in time t+1
     xi = np.zeros((n_time - 1, n_states, n_states))
 
     for from_state in range(n_states):
