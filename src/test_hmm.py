@@ -30,6 +30,23 @@ def generate_data():
     )
 
 
+def generate_data3():
+    initial_conditions = np.asarray([1.0, 0.0, 0.0])
+    transition_matrix = np.asarray([[0.0, 0.5, 0.5], [0.0, 0.9, 0.1], [0, 0, 1]])
+    emission_matrix = np.asarray([[0.5, 0.5], [0.9, 0.1], [0.1, 0.9]])
+
+    observations = np.asarray([2, 3, 3, 2, 2, 2, 3, 2, 3])
+    observations_ind = np.asarray([0 if o == 2 else 1 for o in observations])
+
+    return (
+        initial_conditions,
+        transition_matrix,
+        emission_matrix,
+        observations,
+        observations_ind,
+    )
+
+
 def compare_transition_matrix(use_parallel=True):
     (
         initial_conditions,
@@ -37,10 +54,14 @@ def compare_transition_matrix(use_parallel=True):
         emission_matrix,
         _,
         observations_ind,
-    ) = generate_data()
+    ) = generate_data3()
 
     model = hmm.CategoricalHMM(
-        n_components=2, init_params="", params="t", implementation="scaling", n_iter=10
+        n_components=len(initial_conditions),
+        init_params="",
+        params="t",
+        implementation="scaling",
+        n_iter=10,
     )
     model.startprob_ = initial_conditions
     model.transmat_ = transition_matrix
@@ -91,9 +112,16 @@ def compare_transition_matrix(use_parallel=True):
     plt.plot(np.exp(dll))
     plt.plot(np.exp(model.monitor_.history))
 
+    print("hmmlearn")
     print(model.transmat_)
+    if use_parallel:
+        print("parallel")
+    else:
+        print("correction")
     print(transition_matrix)
+    print("gradient")
     print(graident_transition_matrix)
+    print("diff")
     print(model.transmat_ - transition_matrix)
 
 
@@ -107,7 +135,11 @@ def compare_one():
     ) = generate_data()
 
     model = hmm.CategoricalHMM(
-        n_components=2, init_params="", params="t", implementation="scaling", n_iter=1
+        n_components=len(initial_conditions),
+        init_params="",
+        params="t",
+        implementation="scaling",
+        n_iter=1,
     )
     model.startprob_ = initial_conditions
     model.transmat_ = transition_matrix
@@ -144,8 +176,13 @@ def compare_one():
         transition_matrix,
     )
 
+    print("hmmlearn")
     print(model.transmat_)
+    print("parallel")
     print(transition_matrix_parallel)
+    print("correction")
     print(transition_matrix_correction)
+    print("hmmlearn vs. parallel")
     print(model.transmat_ - transition_matrix_parallel)
+    print("hmmlearn vs. correction")
     print(model.transmat_ - transition_matrix_correction)
