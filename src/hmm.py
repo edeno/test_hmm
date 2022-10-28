@@ -133,7 +133,7 @@ def update_transition_matrix_from_correction_smoothing(
     n_time, n_states = causal_posterior.shape
     new_transition_matrix = np.empty((n_states, n_states))
 
-    xi_correction = np.zeros((n_time, n_states, n_states))
+    xi_correction = np.zeros((n_time - 1, n_states, n_states))
 
     for time_ind in range(n_time - 1):
         for from_state in range(n_states):
