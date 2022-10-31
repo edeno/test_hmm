@@ -155,8 +155,8 @@ def update_transition_matrix_from_correction_smoothing(
 
 
 def reconstruct_transition(off_diagonal_elements, n_states):
-    """Takes logit transformed off-digaonal transition elements
-    and recreates the transition matrix"""
+    """Takes unconstrained off-digaonal transition elements
+    and convert them into probabilities in a transition matrix"""
 
     new_transition_matrix = np.zeros((n_states, n_states))
     is_off_diagonal = ~np.identity(n_states, dtype=bool)
@@ -167,7 +167,9 @@ def reconstruct_transition(off_diagonal_elements, n_states):
 
 def negative_log_likelihood(params, initial_conditions, likelihood):
     n_states = len(initial_conditions)
-    transition_matrix = reconstruct_transition(params, n_states)
+    transition_matrix = reconstruct_transition(
+        params[: n_states * (n_states - 1)], n_states
+    )
 
     _, data_log_likelihood, _ = forward(
         initial_conditions, likelihood, transition_matrix
