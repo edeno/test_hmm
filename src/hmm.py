@@ -193,3 +193,36 @@ def estimate_transition_matrix_from_gradient_descent(
     transition_matrix = reconstruct_transition(result.x, n_states)
 
     return transition_matrix, result
+
+
+def viterbi(initial_conditions, likelihood, transition_matrix):
+
+    LOG_EPS = 1e-16
+    n_time, n_states = likelihood.shape
+
+    log_likelihood = np.log(likelihood + LOG_EPS)
+    log_state_transition = np.log(transition_matrix + LOG_EPS)
+    log_initial_conditions = np.log(initial_conditions + LOG_EPS)
+
+    path_log_prob = np.ones_like(likelihood)
+    back_pointer = np.zeros_like(likelihood, dtype=int)
+
+    path_log_prob[0] = log_initial_conditions + log_likelihood[0]
+
+    for time_ind in range(1, n_time):
+        prior = path_log_prob[time_ind - 1] + log_state_transition
+        for state_ind in range(n_states):
+            back_pointer[time_ind, state_ind] = np.argmax(prior[state_ind])
+            path_log_prob[time_ind, state_ind] = (
+                prior[state_ind, back_pointer[time_ind, state_ind]]
+                + log_likelihood[time_ind, state_ind]
+            )
+
+    # Find the best accumulated path prob in the last time bin
+    # and then trace back the best path
+    best_path = np.zeros((n_time,), dtype=int)
+    best_path[-1] = np.argmax(path_log_prob[-1])
+    for time_ind in range(n_time - 2, -1, -1):
+        best_path[time_ind] = back_pointer[time_ind + 1, best_path[time_ind + 1]]
+
+    return best_path, np.exp(np.max(path_log_prob[-1]))
