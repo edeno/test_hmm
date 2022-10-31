@@ -182,7 +182,7 @@ def estimate_transition_matrix_from_gradient_descent(
     n_states = transition_matrix.shape[0]
     is_off_diagonal = ~np.identity(n_states, dtype=bool)
 
-    x0 = logit(transition_matrix[is_off_diagonal])
+    x0 = np.nan_to_num(logit(transition_matrix[is_off_diagonal]))
     result = minimize(
         negative_log_likelihood,
         x0=x0,
