@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import minimize
 from scipy.special import logit, softmax
+from scipy.stats import poisson
 
 
 def get_likelihood(emission_matrix, observations_ind):
@@ -228,3 +229,25 @@ def viterbi(initial_conditions, likelihood, transition_matrix):
         best_path[time_ind] = back_pointer[time_ind + 1, best_path[time_ind + 1]]
 
     return best_path, np.exp(np.max(path_log_prob[-1]))
+
+
+def check_converged(loglik, previous_loglik, tolerance=1e-4):
+    """
+    We have converged if the slope of the log-likelihood function falls below 'threshold',
+    i.e., |f(t) - f(t-1)| / avg < threshold,
+    where avg = (|f(t)| + |f(t-1)|)/2 and f(t) is log lik at iteration t.
+    'threshold' defaults to 1e-4.
+
+    This stopping criterion is from Numerical Recipes in C p423
+    """
+    delta_loglik = abs(loglik - previous_loglik)
+    avg_loglik = (abs(loglik) + abs(previous_loglik) + np.spacing(1)) / 2
+
+    is_increasing = loglik - previous_loglik >= -1e-3
+    is_converged = (delta_loglik / avg_loglik) < tolerance
+
+    return is_converged, is_increasing
+
+
+def poisson_log_likelihood(spikes, rate):
+    return poisson.logpmf(spikes, mu=rate + np.spacing(1))

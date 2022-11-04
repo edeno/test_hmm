@@ -54,7 +54,7 @@ def compare_transition_matrix(use_parallel=True):
         emission_matrix,
         _,
         observations_ind,
-    ) = generate_data3()
+    ) = generate_data()
 
     model = hmm.CategoricalHMM(
         n_components=len(initial_conditions),
@@ -186,3 +186,28 @@ def compare_one():
     print(model.transmat_ - transition_matrix_parallel)
     print("hmmlearn vs. correction")
     print(model.transmat_ - transition_matrix_correction)
+
+
+def simulate_poisson_spikes(rate, sampling_frequency):
+    """Given a rate, returns a time series of spikes.
+    Parameters
+    ----------
+    rate : np.ndarray, shape (n_time,)
+    sampling_frequency : float
+    Returns
+    -------
+    spikes : np.ndarray, shape (n_time,)
+    """
+    return np.random.poisson(rate / sampling_frequency)
+
+
+def simulate_two_state_poisson(n_time=20_000, sampling_frequency=1000):
+
+    rate = 5.0 * np.ones((n_time,))
+    rate[(n_time // 6) : (2 * n_time // 6)] = 20.0
+    rate[(4 * n_time // 6) : (6 * n_time // 6)] = 20.0
+
+    time = np.arange(n_time) / sampling_frequency
+    spikes = simulate_poisson_spikes(rate, sampling_frequency)
+
+    return time, rate, spikes
