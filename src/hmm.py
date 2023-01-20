@@ -103,24 +103,25 @@ def update_transition_matrix_from_parallel_smoothing(
     scaled_backward_posterior,
     likelihood,
     transition_matrix,
-    data_log_likelihood,
 ):
 
-    n_states = causal_posterior.shape[1]
-    new_transition_matrix = np.empty((n_states, n_states))
+    n_time, n_states = causal_posterior.shape
+    xi = np.empty((n_time - 1, n_states, n_states))
 
     for from_state in range(n_states):
         for to_state in range(n_states):
-            new_transition_matrix[from_state, to_state] = np.sum(
+            xi[:, from_state, to_state] = (
                 causal_posterior[:-1, from_state]
                 * likelihood[1:, to_state]
                 * scaled_backward_posterior[1:, to_state]
                 * transition_matrix[from_state, to_state]
             )
 
-    new_transition_matrix /= np.exp(data_log_likelihood)
+    xi = xi / xi.sum(axis=(1, 2), keepdims=True)
 
-    new_transition_matrix /= new_transition_matrix.sum(axis=1, keepdims=True)
+    summed_xi = xi.sum(axis=0)
+
+    new_transition_matrix = summed_xi / summed_xi.sum(axis=1, keepdims=True)
 
     return new_transition_matrix
 
@@ -251,3 +252,13 @@ def check_converged(loglik, previous_loglik, tolerance=1e-4):
 
 def poisson_log_likelihood(spikes, rate):
     return poisson.logpmf(spikes, mu=rate + np.spacing(1))
+
+
+def hmm_information_criterion(
+    log_likelihood, n_states, n_independent_parameters, n_time=1
+):
+    n_parameters = n_states**2 + n_independent_parameters * n_states - 1
+    aic = -2 * log_likelihood + 2 * n_parameters
+    bic = -2 * log_likelihood + n_parameters * np.log(n_time)
+
+    return aic, bic
