@@ -1,7 +1,7 @@
 name: test_hmm
 channels:
-- defaults
 - conda-forge
+- defaults
 dependencies:
 - "python>=3.8"
 - hmmlearn
@@ -10,6 +10,7 @@ dependencies:
 - scikit-learn
 - matplotlib
 - xarray
+- jax
 - pandas
 - seaborn
 - tqdm
