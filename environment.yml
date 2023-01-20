@@ -23,3 +23,6 @@ dependencies:
 - pytest-cov
 - coveralls
 - black
+- pip
+- pip:
+  - tensorflow-probability
