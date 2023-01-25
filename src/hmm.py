@@ -8,10 +8,13 @@ def get_likelihood(emission_matrix, observations_ind):
     return emission_matrix[:, observations_ind].T
 
 
-def forward(initial_conditions, likelihood, transition_matrix):
+def forward(initial_conditions, log_likelihood, transition_matrix):
 
     n_states = len(initial_conditions)
-    n_time = len(likelihood)
+    n_time = len(log_likelihood)
+
+    max_log_likelihood = np.nanmax(log_likelihood, axis=1, keepdims=True)
+    likelihood = np.exp(log_likelihood - max_log_likelihood)
 
     causal_posterior = np.zeros((n_time, n_states))
     causal_posterior[0] = initial_conditions * likelihood[0]
@@ -27,7 +30,7 @@ def forward(initial_conditions, likelihood, transition_matrix):
         causal_posterior[time_ind] /= scaling[time_ind]
 
     # log probability of observations given model
-    data_log_likelihood = np.sum(np.log(scaling))
+    data_log_likelihood = np.sum(np.log(scaling) + max_log_likelihood.squeeze())
 
     return causal_posterior, data_log_likelihood, scaling
 
@@ -40,10 +43,11 @@ def correction_smoothing(causal_posterior: np.ndarray, transition_matrix: np.nda
 
     for time_ind in range(n_time - 2, -1, -1):
         numerator = transition_matrix * causal_posterior[time_ind][:, np.newaxis]
+        norm = numerator.sum(axis=0)
+        norm = np.where(np.isclose(norm, 0.0), 1.0, norm)
+
         acausal_posterior[time_ind] = np.sum(
-            numerator
-            * acausal_posterior[time_ind + 1]
-            / (numerator.sum(axis=0) + np.spacing(1)),
+            numerator * acausal_posterior[time_ind + 1] / norm,
             axis=1,
         )
     return acausal_posterior
