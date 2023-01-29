@@ -10,11 +10,11 @@ def forward(initial_conditions, log_likelihood, transition_matrix):
     likelihood = np.exp(log_likelihood - max_log_likelihood)
     likelihood = np.clip(likelihood, a_min=1e-15, a_max=1.0)
 
+    predictive_distribution[0] = initial_conditions
     causal_posterior[0] = initial_conditions * likelihood[0]
     norm = np.nansum(causal_posterior[0])
     marginal_likelihood = np.log(norm)
     causal_posterior[0] /= norm
-    predictive_distribution[0] = causal_posterior[0]
 
     for t in range(1, n_time):
         # Predict
@@ -44,8 +44,8 @@ def smoother(causal_posterior, predictive_distribution, transition_matrix):
             0.0,
             acausal_posterior[t + 1] / predictive_distribution[t + 1],
         )
-        acausal_posterior[t] = (
-            causal_posterior[t] * transition_matrix @ relative_distribution
+        acausal_posterior[t] = causal_posterior[t] * (
+            transition_matrix @ relative_distribution
         )
         acausal_posterior[t] /= acausal_posterior[t].sum()
 
@@ -71,7 +71,6 @@ def estimate_transition_matrix(
                     * acausal_posterior[t + 1, to_state]
                     / predictive_distribution[t + 1, to_state]
                 )
-        joint_distribution[t] /= joint_distribution[t].sum(axis=-1, keepdims=True)
 
     new_transition_matrix = joint_distribution.sum(axis=0) / joint_distribution.sum(
         axis=(0, 2)
