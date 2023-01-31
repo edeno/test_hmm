@@ -58,23 +58,25 @@ def estimate_transition_matrix(
     transition_matrix,
     acausal_posterior,
 ):
+    relative_distribution = np.where(
+        np.isclose(predictive_distribution[1:], 0.0),
+        0.0,
+        acausal_posterior[1:] / predictive_distribution[1:],
+    )[:, np.newaxis]
 
-    n_time, n_states = acausal_posterior.shape
-    joint_distribution = np.zeros((n_time - 1, n_states, n_states))
-
-    for t in range(n_time - 1):
-        for from_state in range(n_states):
-            for to_state in range(n_states):
-                joint_distribution[t, from_state, to_state] = (
-                    transition_matrix[from_state, to_state]
-                    * causal_posterior[t, from_state]
-                    * acausal_posterior[t + 1, to_state]
-                    / predictive_distribution[t + 1, to_state]
-                )
-
-    new_transition_matrix = joint_distribution.sum(axis=0) / joint_distribution.sum(
-        axis=(0, 2)
+    # p(x_t, x_{t+1} | O_{1:T})
+    joint_distribution = (
+        transition_matrix[np.newaxis]
+        * causal_posterior[:-1, :, np.newaxis]
+        * relative_distribution
     )
+
+    new_transition_matrix = (
+        joint_distribution.sum(axis=0)
+        / acausal_posterior[:-1].sum(axis=0, keepdims=True).T
+    )
+
+    new_transition_matrix /= new_transition_matrix.sum(axis=1, keepdims=True)
 
     return new_transition_matrix
 
