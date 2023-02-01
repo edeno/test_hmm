@@ -102,6 +102,38 @@ def make_spline_predict_matrix(
     return build_design_matrices([design_info], predict_data)[0]
 
 
+def make_discrete_state_transitions(is_ripple, no_spike_to_no_spike_prob):
+    local_to_local_prob = (
+        np.logical_and(~is_ripple[:-1], ~is_ripple[1:]).sum() / (~is_ripple[:-1]).sum()
+    )
+
+    non_local_to_non_local_prob = (
+        np.logical_and(is_ripple[:-1], is_ripple[1:]).sum() / is_ripple[:-1].sum()
+    )
+
+    discrete_state_transitions = np.asarray(
+        [
+            [
+                local_to_local_prob,
+                (1 - local_to_local_prob) / 2,
+                (1 - local_to_local_prob) / 2,
+            ],
+            [
+                (1 - no_spike_to_no_spike_prob) / 2,
+                no_spike_to_no_spike_prob,
+                (1 - no_spike_to_no_spike_prob) / 2,
+            ],
+            [
+                (1 - non_local_to_non_local_prob) / 2,
+                (1 - non_local_to_non_local_prob) / 2,
+                non_local_to_non_local_prob,
+            ],
+        ]
+    )
+
+    return discrete_state_transitions
+
+
 def setup_nonlocal_switching_model(
     is_ripple,
     spikes,
@@ -135,32 +167,8 @@ def setup_nonlocal_switching_model(
 
     is_training = ~is_ripple
 
-    local_to_local_prob = (
-        np.logical_and(~is_ripple[:-1], ~is_ripple[1:]).sum() / (~is_ripple[:-1]).sum()
-    )
-
-    non_local_to_non_local_prob = (
-        np.logical_and(is_ripple[:-1], is_ripple[1:]).sum() / is_ripple[:-1].sum()
-    )
-
-    discrete_state_transitions = np.asarray(
-        [
-            [
-                local_to_local_prob,
-                (1 - local_to_local_prob) / 2,
-                (1 - local_to_local_prob) / 2,
-            ],
-            [
-                (1 - no_spike_to_no_spike_prob) / 2,
-                no_spike_to_no_spike_prob,
-                (1 - no_spike_to_no_spike_prob) / 2,
-            ],
-            [
-                (1 - non_local_to_non_local_prob) / 2,
-                (1 - non_local_to_non_local_prob) / 2,
-                non_local_to_non_local_prob,
-            ],
-        ]
+    discrete_state_transitions = make_discrete_state_transitions(
+        is_ripple, no_spike_to_no_spike_prob
     )
 
     continuous_state_transitions = np.zeros((n_state_bins, n_state_bins))
@@ -193,8 +201,16 @@ def setup_nonlocal_switching_model(
         design_matrix.design_info, env.place_bin_centers_
     )
 
-    plt.figure(figsize=(10, 10))
-    plt.imshow(np.log(continuous_state_transitions + np.spacing(1)))
+    plt.figure(figsize=(15, 15))
+    plt.pcolormesh(
+        np.arange(state_ind.shape[0] + 1),
+        np.arange(state_ind.shape[0] + 1),
+        np.log(continuous_state_transitions + np.spacing(1)),
+    )
+    plt.axhline(1, color="red")
+    plt.axvline(1, color="red")
+    plt.axhline(2, color="red")
+    plt.axvline(2, color="red")
 
     plt.figure(figsize=(5, 5))
     plt.imshow(np.log(discrete_state_transitions + np.spacing(1)))
@@ -202,6 +218,7 @@ def setup_nonlocal_switching_model(
     return (
         design_matrix,
         predict_matrix,
+        initial_conditions,
         discrete_state_transitions,
         continuous_state_transitions,
         state_ind,
@@ -215,6 +232,7 @@ def fit_switching_model(
     spikes,
     design_matrix,
     predict_matrix,
+    initial_conditions,
     discrete_state_transitions,
     continuous_state_transitions,
     state_ind,
@@ -394,32 +412,8 @@ def setup_nonlocal_hmm_model(
 
     is_training = ~is_ripple
 
-    local_to_local_prob = (
-        np.logical_and(~is_ripple[:-1], ~is_ripple[1:]).sum() / (~is_ripple[:-1]).sum()
-    )
-
-    non_local_to_non_local_prob = (
-        np.logical_and(is_ripple[:-1], is_ripple[1:]).sum() / is_ripple[:-1].sum()
-    )
-
-    discrete_state_transitions = np.asarray(
-        [
-            [
-                local_to_local_prob,
-                (1 - local_to_local_prob) / 2,
-                (1 - local_to_local_prob) / 2,
-            ],
-            [
-                (1 - no_spike_to_no_spike_prob) / 2,
-                no_spike_to_no_spike_prob,
-                (1 - no_spike_to_no_spike_prob) / 2,
-            ],
-            [
-                (1 - non_local_to_non_local_prob) / 2,
-                (1 - non_local_to_non_local_prob) / 2,
-                non_local_to_non_local_prob,
-            ],
-        ]
+    discrete_state_transitions = make_discrete_state_transitions(
+        is_ripple, no_spike_to_no_spike_prob
     )
 
     data = {"x": position}
@@ -435,6 +429,7 @@ def setup_nonlocal_hmm_model(
     return (
         design_matrix,
         predict_matrix,
+        initial_conditions,
         discrete_state_transitions,
         zero_rates,
         is_training,
@@ -446,6 +441,7 @@ def fit_hmm_model(
     spikes,
     design_matrix,
     predict_matrix,
+    initial_conditions,
     discrete_state_transitions,
     zero_rates,
     is_training,
