@@ -16,6 +16,8 @@ from src.hmm3 import estimate_transition_matrix, forward, smoother
 
 jax.config.update("jax_platform_name", "cpu")
 
+EPS = 1e-15
+
 
 def load_data(work_computer=False):
     if work_computer:
@@ -42,7 +44,7 @@ def fit_regression(design_matrix, weights, spikes):
         coefficients, spikes=spikes, design_matrix=design_matrix, weights=weights
     ):
         conditional_intensity = jnp.exp(design_matrix @ coefficients)
-        conditional_intensity = jnp.clip(conditional_intensity, a_min=1e-15, a_max=None)
+        conditional_intensity = jnp.clip(conditional_intensity, a_min=EPS, a_max=None)
         log_likelihood = weights * jax.scipy.stats.poisson.logpmf(
             spikes, conditional_intensity
         )
@@ -69,7 +71,7 @@ def fit_penalized_regression(design_matrix, weights, spikes, penalty=0.0):
         coefficients, spikes=spikes, design_matrix=design_matrix, weights=weights
     ):
         conditional_intensity = jnp.exp(design_matrix @ coefficients)
-        conditional_intensity = jnp.clip(conditional_intensity, a_min=1e-15, a_max=None)
+        conditional_intensity = jnp.clip(conditional_intensity, a_min=EPS, a_max=None)
         log_likelihood = weights * jax.scipy.stats.poisson.logpmf(
             spikes, conditional_intensity
         )
@@ -239,7 +241,7 @@ def fit_switching_model(
     zero_rates,
     is_training,
     tolerance=1e-4,
-    max_iter=4,
+    max_iter=20,
     fit_likelihood=True,
     fit_inital_conditions=False,
     fit_discrete_transition=False,
@@ -286,13 +288,13 @@ def fit_switching_model(
             )
 
             local_rates = np.exp(design_matrix @ coefficients)
-            local_rates = np.clip(local_rates, a_min=1e-15, a_max=None)
+            local_rates = np.clip(local_rates, a_min=EPS, a_max=None)
             log_likelihood[:, state_ind == 0] = np.sum(
                 scipy.stats.poisson.logpmf(spikes, local_rates), axis=-1
             )[:, np.newaxis]
 
             non_local_rates = np.exp(predict_matrix @ coefficients)
-            non_local_rates = np.clip(non_local_rates, a_min=1e-15, a_max=None)
+            non_local_rates = np.clip(non_local_rates, a_min=EPS, a_max=None)
             for s, r in zip(spikes.T, non_local_rates.T):
                 log_likelihood[:, state_ind == 2] += scipy.stats.poisson.logpmf(
                     s[:, np.newaxis], r[np.newaxis]
@@ -388,6 +390,8 @@ def fit_switching_model(
         acausal_state_probabilities,
         causal_posterior,
         marginal_log_likelihoods,
+        initial_conditions,
+        discrete_state_transitions,
         *debug,
     )
 
@@ -446,7 +450,7 @@ def fit_hmm_model(
     zero_rates,
     is_training,
     tolerance=1e-4,
-    max_iter=4,
+    max_iter=20,
     fit_likelihood=True,
     fit_inital_conditions=False,
     fit_discrete_transition=False,
@@ -455,6 +459,7 @@ def fit_hmm_model(
     n_states = discrete_state_transitions.shape[0]
 
     marginal_log_likelihoods = []
+    non_local_rates_iter = []
     n_iter = 0
     converged = False
 
@@ -477,7 +482,7 @@ def fit_hmm_model(
             )
 
             local_rates = np.exp(design_matrix @ coefficients)
-            local_rates = np.clip(local_rates, a_min=1e-15, a_max=None)
+            local_rates = np.clip(local_rates, a_min=EPS, a_max=None)
             non_local_rates = np.max(local_rates, axis=0, keepdims=True) - local_rates
 
             log_likelihood[:, 0] = np.sum(
@@ -485,6 +490,10 @@ def fit_hmm_model(
             )
             log_likelihood[:, 2] = np.sum(
                 scipy.stats.poisson.logpmf(spikes, non_local_rates), axis=-1
+            )
+
+            non_local_rates_iter.append(
+                np.clip(np.exp(predict_matrix @ coefficients), a_min=EPS, a_max=None)
             )
 
         # Expectation step
@@ -534,9 +543,6 @@ def fit_hmm_model(
         else:
             print(f"iteration {n_iter}, " f"likelihood: {marginal_log_likelihoods[-1]}")
 
-    non_local_rates = np.exp(predict_matrix @ coefficients)
-    non_local_rates = np.clip(non_local_rates, a_min=1e-15, a_max=None)
-
     predicted_state = viterbi(
         initial_conditions, np.exp(log_likelihood), discrete_state_transitions
     )[0]
@@ -546,7 +552,231 @@ def fit_hmm_model(
         acausal_posterior,
         causal_posterior,
         marginal_log_likelihoods,
-        non_local_rates,
+        non_local_rates_iter,
+        initial_conditions,
+        discrete_state_transitions,
+    )
+
+
+def setup_contfrag_model(
+    is_ripple,
+    position,
+    env,
+    df=15,
+):
+
+    random_walk = RandomWalk().make_state_transition([env])
+    uniform = Uniform().make_state_transition([env])
+
+    state_names = ["continuous", "fragmented"]
+
+    n_states = len(state_names)
+    n_env_bins = env.place_bin_centers_.shape[0]
+    bin_sizes = [n_env_bins, n_env_bins]
+
+    state_ind = np.concatenate(
+        [
+            ind * np.ones((bin_size,), dtype=int)
+            for ind, bin_size in enumerate(bin_sizes)
+        ]
+    )
+    n_state_bins = len(state_ind)
+
+    initial_conditions = np.ones((n_state_bins,)) / n_state_bins
+
+    is_training = ~is_ripple
+
+    discrete_state_transitions = np.asarray([[0.98, 0.02], [0.02, 0.98]])
+
+    continuous_state_transitions = np.zeros((n_state_bins, n_state_bins))
+
+    # need to zero out transitions to invalid position bins?
+    for from_state in range(n_states):
+        for to_state in range(n_states):
+            inds = np.ix_(state_ind == from_state, state_ind == to_state)
+
+            if np.logical_and(from_state == 0, to_state == 0):
+                continuous_state_transitions[inds] = random_walk
+            else:
+                continuous_state_transitions[inds] = uniform
+
+    data = {"x": position}
+    design_matrix = dmatrix(f"bs(x, df={df})", data)
+    predict_matrix = make_spline_predict_matrix(
+        design_matrix.design_info, env.place_bin_centers_
+    )
+
+    plt.figure(figsize=(15, 15))
+    plt.pcolormesh(
+        np.arange(state_ind.shape[0] + 1),
+        np.arange(state_ind.shape[0] + 1),
+        np.log(continuous_state_transitions + np.spacing(1)),
+    )
+
+    plt.figure(figsize=(5, 5))
+    plt.imshow(np.log(discrete_state_transitions + np.spacing(1)))
+
+    return (
+        design_matrix,
+        predict_matrix,
+        initial_conditions,
+        discrete_state_transitions,
+        continuous_state_transitions,
+        state_ind,
+        is_training,
+        state_names,
+    )
+
+
+def fit_contfrag_model(
+    spikes,
+    design_matrix,
+    predict_matrix,
+    initial_conditions,
+    discrete_state_transitions,
+    continuous_state_transitions,
+    state_ind,
+    is_training,
+    tolerance=1e-4,
+    max_iter=20,
+    fit_inital_conditions=False,
+    fit_discrete_transition=False,
+):
+
+    n_time = spikes.shape[0]
+    n_states = discrete_state_transitions.shape[0]
+    n_state_bins = continuous_state_transitions.shape[0]
+
+    causal_state_probabilities = np.zeros((n_time, n_states))
+    acausal_state_probabilities = np.zeros((n_time, n_states))
+    predictive_state_probabilities = np.zeros((n_time, n_states))
+
+    coefficients_iter = []
+    local_rates_iter = []
+    non_local_rates_iter = []
+    is_training_iter = []
+    acausal_posterior_iter = []
+
+    marginal_log_likelihoods = []
+    n_iter = 0
+    converged = False
+
+    log_likelihood = np.zeros((n_time, n_state_bins))
+
+    while not converged and (n_iter < max_iter):
+
+        # Likelihoods
+        print("Likelihoods")
+        if n_iter == 0:
+            coefficients = np.stack(
+                [
+                    fit_regression(
+                        design_matrix,
+                        is_training.astype(float),
+                        s,
+                    )
+                    for s in tqdm(spikes.T)
+                ],
+                axis=1,
+            )
+
+            non_local_rates = np.exp(predict_matrix @ coefficients)
+            non_local_rates = np.clip(non_local_rates, a_min=EPS, a_max=None)
+            for s, r in zip(spikes.T, non_local_rates.T):
+                log_likelihood[:, state_ind == 0] += scipy.stats.poisson.logpmf(
+                    s[:, np.newaxis], r[np.newaxis]
+                )
+            log_likelihood[:, state_ind == 1] = log_likelihood[:, state_ind == 0]
+
+        coefficients_iter.append(coefficients)
+        non_local_rates_iter.append(non_local_rates)
+        is_training_iter.append(is_training.astype(float))
+
+        discrete_state_transitions_per_bin = discrete_state_transitions[
+            np.ix_(state_ind, state_ind)
+        ]
+
+        transition_matrix = (
+            discrete_state_transitions_per_bin * continuous_state_transitions
+        )
+
+        # Expectation step
+        print("Expectation Step")
+        causal_posterior, predictive_distribution, marginal_log_likelihood = forward(
+            initial_conditions, log_likelihood, transition_matrix
+        )
+        acausal_posterior = smoother(
+            causal_posterior, predictive_distribution, transition_matrix
+        )
+
+        acausal_posterior_iter.append(acausal_posterior)
+
+        # Maximization step
+        print("Maximization Step")
+        for ind in range(n_states):
+            is_state = state_ind == ind
+            causal_state_probabilities[:, ind] = causal_posterior[:, is_state].sum(
+                axis=1
+            )
+            acausal_state_probabilities[:, ind] = acausal_posterior[:, is_state].sum(
+                axis=1
+            )
+            predictive_state_probabilities[:, ind] = predictive_distribution[
+                :, is_state
+            ].sum(axis=1)
+
+        if fit_discrete_transition:
+            discrete_state_transitions = estimate_transition_matrix(
+                causal_state_probabilities,
+                predictive_state_probabilities,
+                discrete_state_transitions,
+                acausal_state_probabilities,
+            )
+
+        if fit_inital_conditions:
+            initial_conditions = acausal_posterior[0]
+
+        # Stats
+        print("Stats")
+        n_iter += 1
+
+        marginal_log_likelihoods.append(marginal_log_likelihood)
+        if n_iter > 1:
+            log_likelihood_change = (
+                marginal_log_likelihoods[-1] - marginal_log_likelihoods[-2]
+            )
+            converged, _ = check_converged(
+                marginal_log_likelihoods[-1], marginal_log_likelihoods[-2], tolerance
+            )
+
+            print(
+                f"iteration {n_iter}, "
+                f"likelihood: {marginal_log_likelihoods[-1]}, "
+                f"change: {log_likelihood_change}"
+            )
+        else:
+            print(f"iteration {n_iter}, " f"likelihood: {marginal_log_likelihoods[-1]}")
+
+    predicted_state = viterbi(
+        initial_conditions, np.exp(log_likelihood), transition_matrix
+    )[0]
+
+    debug = (
+        coefficients_iter,
+        local_rates_iter,
+        non_local_rates_iter,
+        is_training_iter,
+        acausal_posterior_iter,
+    )
+    return (
+        predicted_state,
+        acausal_posterior,
+        acausal_state_probabilities,
+        causal_posterior,
+        marginal_log_likelihoods,
+        initial_conditions,
+        discrete_state_transitions,
+        *debug,
     )
 
 
@@ -596,7 +826,7 @@ def plot_switching_model(
 
     sliced_time = time[time_slice]
 
-    t, x = np.meshgrid(time, env.place_bin_centers_)
+    t, x = np.meshgrid(sliced_time, env.place_bin_centers_)
 
     neuron_sort_ind = np.argsort(
         env.place_bin_centers_[non_local_rates.argmax(axis=0)].squeeze()
