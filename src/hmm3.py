@@ -1,7 +1,28 @@
 import numpy as np
 
 
-def forward(initial_conditions, log_likelihood, transition_matrix):
+def forward(
+    initial_conditions: np.ndarray,
+    log_likelihood: np.ndarray,
+    transition_matrix: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Causal algorithm for computing the posterior distribution of the hidden states of a switching model
+
+    Parameters
+    ----------
+    initial_conditions : np.ndarray, shape (n_states,)
+    log_likelihood : np.ndarray, shape (n_time, n_states)
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+
+    Returns
+    -------
+    causal_posterior : np.ndarray, shape (n_time, n_states)
+        Causal posterior distribution
+    predictive_distribution : np.ndarray, shape (n_time, n_states)
+        One step predictive distribution
+    marginal_likelihood : float
+
+    """
     n_time = log_likelihood.shape[0]
 
     predictive_distribution = np.zeros_like(log_likelihood)
@@ -31,7 +52,25 @@ def forward(initial_conditions, log_likelihood, transition_matrix):
     return causal_posterior, predictive_distribution, marginal_likelihood
 
 
-def smoother(causal_posterior, predictive_distribution, transition_matrix):
+def smoother(
+    causal_posterior: np.ndarray,
+    predictive_distribution: np.ndarray,
+    transition_matrix: np.ndarray,
+) -> np.ndarray:
+    """Acausal algorithm for computing the posterior distribution of the hidden states of a switching model
+
+    Parameters
+    ----------
+    causal_posterior : np.ndarray, shape (n_time, n_states)
+    predictive_distribution : np.ndarray, shape (n_time, n_states)
+        One step predictive distribution
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+
+    Returns
+    -------
+    acausal_posterior, np.ndarray, shape (n_time, n_states)
+
+    """
     n_time = causal_posterior.shape[0]
 
     acausal_posterior = np.zeros_like(causal_posterior)
@@ -52,12 +91,47 @@ def smoother(causal_posterior, predictive_distribution, transition_matrix):
     return acausal_posterior
 
 
+def estimate_initial_conditions(acausal_posterior: np.ndarray) -> np.ndarray:
+    """_summary_
+
+    Parameters
+    ----------
+    acausal_posterior : np.ndarray, shape (n_time, n_states)
+        Acausal posterior distribution
+
+    Returns
+    -------
+    initial_conditions : np.ndarray, shape (n_states,)
+        Estimated initial conditions
+
+    """
+    return acausal_posterior[0]
+
+
 def estimate_transition_matrix(
-    causal_posterior,
-    predictive_distribution,
-    transition_matrix,
-    acausal_posterior,
-):
+    causal_posterior: np.ndarray,
+    predictive_distribution: np.ndarray,
+    transition_matrix: np.ndarray,
+    acausal_posterior: np.ndarray,
+) -> np.ndarray:
+    """Estimate the transition matrix
+
+    Parameters
+    ----------
+    causal_posterior : np.ndarray, shape (n_time, n_states)
+        Causal posterior distribution
+    predictive_distribution : np.ndarray, shape (n_time, n_states)
+        One step predictive distribution
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+        Current estimate of the transition matrix
+    acausal_posterior : np.ndarray, shape (n_time, n_states)
+        Acausal posterior distribution
+    Returns
+    -------
+    new_transition_matrix, np.ndarray, shape (n_states, n_states)
+        New estimate of the transition matrix
+
+    """
     relative_distribution = np.where(
         np.isclose(predictive_distribution[1:], 0.0),
         0.0,
@@ -81,7 +155,27 @@ def estimate_transition_matrix(
     return new_transition_matrix
 
 
-def estimate_parameters_via_em(initial_conditions, log_likelihood, transition_matrix):
+def estimate_parameters_via_em(
+    initial_conditions: np.ndarray,
+    log_likelihood: np.ndarray,
+    transition_matrix: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """Use the expectation maximization algorithm to estimate the parameters of a switching model
+
+    Parameters
+    ----------
+    initial_conditions : np.ndarray, shape (n_states,)
+    log_likelihood : np.ndarray, shape (n_time, n_states)
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+
+    Returns
+    -------
+    initial_conditions : np.ndarray, shape (n_states,)
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+    acausal_posterior : np.ndarray, shape (n_time, n_states)
+    marginal_likelihood : float
+
+    """
     # Expectation
     causal_posterior, predictive_distribution, marginal_likelihood = forward(
         initial_conditions, log_likelihood, transition_matrix
@@ -91,7 +185,7 @@ def estimate_parameters_via_em(initial_conditions, log_likelihood, transition_ma
     )
 
     # Maximization
-    initial_conditions = acausal_posterior[0]
+    initial_conditions = estimate_initial_conditions(acausal_posterior)
     transition_matrix = estimate_transition_matrix(
         causal_posterior,
         predictive_distribution,
@@ -100,3 +194,35 @@ def estimate_parameters_via_em(initial_conditions, log_likelihood, transition_ma
     )
 
     return initial_conditions, transition_matrix, acausal_posterior, marginal_likelihood
+
+
+def viterbi(initial_conditions, log_likelihood, transition_matrix):
+
+    EPS = 1e-15
+    n_time, n_states = log_likelihood.shape
+
+    log_state_transition = np.log(np.clip(transition_matrix, a_min=EPS, a_max=1.0))
+    log_initial_conditions = np.log(np.clip(initial_conditions, a_min=EPS, a_max=1.0))
+
+    path_log_prob = np.ones_like(log_likelihood)
+    back_pointer = np.zeros_like(log_likelihood, dtype=int)
+
+    path_log_prob[0] = log_initial_conditions + log_likelihood[0]
+
+    for time_ind in range(1, n_time):
+        prior = path_log_prob[time_ind - 1] + log_state_transition
+        for state_ind in range(n_states):
+            back_pointer[time_ind, state_ind] = np.argmax(prior[state_ind])
+            path_log_prob[time_ind, state_ind] = (
+                prior[state_ind, back_pointer[time_ind, state_ind]]
+                + log_likelihood[time_ind, state_ind]
+            )
+
+    # Find the best accumulated path prob in the last time bin
+    # and then trace back the best path
+    best_path = np.zeros((n_time,), dtype=int)
+    best_path[-1] = np.argmax(path_log_prob[-1])
+    for time_ind in range(n_time - 2, -1, -1):
+        best_path[time_ind] = back_pointer[time_ind + 1, best_path[time_ind + 1]]
+
+    return best_path, np.exp(np.max(path_log_prob[-1]))
