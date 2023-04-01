@@ -51,7 +51,6 @@ def fit_regression(design_matrix, weights, spikes):
         return -log_likelihood.sum()
 
     dlike = jax.grad(neglogp)
-    dlike2 = jax.hessian(neglogp)
 
     initial_condition = np.array([np.log(np.average(spikes, weights=weights))])
     initial_condition = np.concatenate(
@@ -59,7 +58,7 @@ def fit_regression(design_matrix, weights, spikes):
     )
 
     res = minimize(
-        neglogp, x0=initial_condition, method="Newton-CG", jac=dlike, hess=dlike2
+        neglogp, x0=initial_condition, method="BFGS", jac=dlike
     )
 
     return res.x
