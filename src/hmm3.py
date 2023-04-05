@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.special import softmax
 
 
 def forward(
@@ -226,3 +227,40 @@ def viterbi(initial_conditions, log_likelihood, transition_matrix):
         best_path[time_ind] = back_pointer[time_ind + 1, best_path[time_ind + 1]]
 
     return best_path, np.exp(np.max(path_log_prob[-1]))
+
+
+def hmm_information_criterion(
+    log_likelihood, n_states, n_independent_parameters, n_time=1
+):
+    n_parameters = n_states**2 + n_independent_parameters * n_states - 1
+    aic = -2 * log_likelihood + 2 * n_parameters
+    bic = -2 * log_likelihood + n_parameters * np.log(n_time)
+
+    return aic, bic
+
+
+def centered_softmax_forward(y):
+    """`softmax(x) = exp(x-c) / sum(exp(x-c))` where c is the last coordinate
+
+    Example
+    -------
+    > y = np.log([2, 3, 4])
+    > np.allclose(centered_softmax_forward(y), [0.2, 0.3, 0.4, 0.1])
+    """
+    if y.ndim == 1:
+        y = np.append(y, 0)
+    else:
+        y = np.column_stack((y, np.zeros((y.shape[0],))))
+
+    return softmax(y, axis=-1)
+
+
+def centered_softmax_inverse(y):
+    """`softmax(x) = exp(x-c) / sum(exp(x-c))` where c is the last coordinate
+
+    Example
+    -------
+    > y = np.asarray([0.2, 0.3, 0.4, 0.1])
+    > np.allclose(np.exp(centered_softmax_inverse(y)), np.asarray([2,3,4]))
+    """
+    return np.log(y[..., :-1]) - np.log(y[..., [-1]])
