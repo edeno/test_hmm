@@ -818,7 +818,7 @@ def plot_switching_model(
     acausal_posterior,
     state_names,
     figsize=(20, 5),
-    time_slice=(0, 10_000),
+    time_slice=slice(0, 10_000),
 ):
 
     _, axes = plt.subplots(3, 1, sharex=True, constrained_layout=True, figsize=figsize)
