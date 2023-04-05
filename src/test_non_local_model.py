@@ -57,9 +57,7 @@ def fit_regression(design_matrix, weights, spikes):
         [initial_condition, np.zeros(design_matrix.shape[1] - 1)]
     )
 
-    res = minimize(
-        neglogp, x0=initial_condition, method="BFGS", jac=dlike
-    )
+    res = minimize(neglogp, x0=initial_condition, method="BFGS", jac=dlike)
 
     return res.x
 
