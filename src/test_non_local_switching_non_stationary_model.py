@@ -63,7 +63,6 @@ def load_data(work_computer=False):
 
 
 def make_spline_design_matrix(position, place_bin_edges, knot_spacing=10):
-
     position = atleast_2d(position)
     inner_knots = []
     for pos, edges in zip(position.T, place_bin_edges.T):
@@ -165,9 +164,7 @@ def estimate_initial_discrete_transition(
     no_spike_speed_threshold: float = 4.0,
     speed_knots: None | np.ndarray = None,
     is_stationary: bool = False,
-
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-
     is_no_spike_time = estimate_no_spike_times(
         spikes,
         speed=speed,
@@ -209,7 +206,6 @@ def estimate_initial_discrete_transition(
         discrete_transition_coefficients = None
         discrete_transition_design_matrix = None
     else:
-
         from_states = {
             "local": lagmat(is_local_time, maxlag=1).astype(bool).squeeze(),
             "no_spike": lagmat(is_no_spike_time, maxlag=1).astype(bool).squeeze(),
@@ -288,7 +284,6 @@ def estimate_initial_discrete_transition2(
     speed_knots: None | np.ndarray = None,
     is_stationary: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-
     is_no_spike_time = estimate_no_spike_times(
         spikes,
         speed=speed,
@@ -330,7 +325,6 @@ def estimate_initial_discrete_transition2(
         discrete_transition_coefficients = None
         discrete_transition_design_matrix = None
     else:
-
         if speed_knots is None:
             speed_knots = [1.0, 4.0, 16.0, 32.0, 64.0]
 
@@ -410,7 +404,6 @@ def estimate_initial_discrete_transition3(
     speed_knots: None | np.ndarray = None,
     is_stationary: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-
     is_no_spike_time = estimate_no_spike_times(
         spikes,
         speed=speed,
@@ -454,7 +447,6 @@ def estimate_initial_discrete_transition3(
         discrete_transition_coefficients = None
         discrete_transition_design_matrix = None
     else:
-
         is_states = {
             "local": is_local_time.astype(bool).squeeze(),
             "no_spike": is_no_spike_time.astype(bool).squeeze(),
@@ -501,6 +493,74 @@ def estimate_initial_discrete_transition3(
         discrete_state_transitions = discrete_state_transitions[np.newaxis] * np.ones(
             (n_time, n_states, n_states)
         )
+
+    return (
+        discrete_state_transitions,
+        discrete_transition_coefficients,
+        discrete_transition_design_matrix,
+    )
+
+
+def make_transition_from_diag(diag):
+    n_states = len(diag)
+    transition_matrix = diag * np.eye(n_states)
+    off_diag = ((1.0 - diag) / (n_states - 1.0))[:, np.newaxis]
+    transition_matrix += np.ones((n_states, n_states)) * off_diag - off_diag * np.eye(
+        n_states
+    )
+
+    return transition_matrix
+
+
+def estimate_initial_discrete_transition4(
+    is_ripple: np.ndarray,
+    spikes: np.ndarray,
+    speed: np.ndarray,
+    sampling_frequency: int = 500,
+    no_spike_rate_threshold: float = 1e-3,
+    no_spike_smoothing_sigma: float = 0.015,
+    no_spike_speed_threshold: float = 4.0,
+    speed_knots: None | np.ndarray = None,
+    is_stationary: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    state_names = ["local", "no_spike", "non_local"]
+    n_states = len(state_names)
+
+    if is_stationary:
+        diag = np.array([0.968, 0.99, 0.968])
+
+        discrete_state_transitions = make_transition_from_diag(diag)
+
+        discrete_transition_coefficients = None
+        discrete_transition_design_matrix = None
+    else:
+        immobility_diag = np.array([0.999, 0.99, 0.98])
+        discrete_state_transitions_immobility = make_transition_from_diag(
+            immobility_diag
+        )
+
+        run_diag = np.array([0.968, 0.99, 0.968])
+        discrete_state_transitions_run = make_transition_from_diag(run_diag)
+
+        if speed_knots is None:
+            speed_knots = [1.0, 4.0, 16.0, 32.0, 64.0]
+
+        formula = f"1 + bs(speed, knots={speed_knots})"
+        data = {"speed": lagmat(speed, maxlag=1)}
+        discrete_transition_design_matrix = dmatrix(formula, data)
+
+        n_time, n_coefficients = discrete_transition_design_matrix.shape
+
+        discrete_transition_coefficients = np.zeros(
+            (n_coefficients, n_states, n_states - 1)
+        )
+        discrete_transition_coefficients[0] = centered_softmax_inverse(
+            discrete_state_transitions_run
+        )
+
+        discrete_state_transitions = discrete_state_transitions_run[
+            np.newaxis
+        ] * np.ones((n_time, n_states, n_states))
 
     return (
         discrete_state_transitions,
@@ -601,7 +661,7 @@ def setup_nonlocal_switching_model(
         discrete_state_transitions,
         discrete_transition_coefficients,
         discrete_transition_design_matrix,
-    ) = estimate_initial_discrete_transition3(
+    ) = estimate_initial_discrete_transition4(
         is_ripple,
         spikes,
         speed,
@@ -908,7 +968,6 @@ def fit_switching_model(
         if np.logical_and(
             np.logical_or(n_iter == 0, fit_likelihood), not provided_likelihood
         ):
-
             coefficients = []
             local_rates = []
             non_local_rates = []
@@ -1139,3 +1198,9 @@ def plot_switching_model(
     axes[2].scatter(sliced_time, position[time_slice], s=1, color="magenta", zorder=2)
     axes[3].fill_between(sliced_time, speed[time_slice], color="lightgrey", zorder=2)
     plt.xlim((sliced_time.min(), sliced_time.max()))
+
+
+def non_local_state_density(acausal_posterior, state_ind, non_local_state_ind=2):
+    return acausal_posterior[:, state_ind == non_local_state_ind] / acausal_posterior[
+        :, state_ind == non_local_state_ind
+    ].sum(axis=1)
