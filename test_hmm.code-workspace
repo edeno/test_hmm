@@ -6,7 +6,9 @@
 	],
 	"settings": {
 		"[python]": {
-			"editor.formatOnPaste": false
-		}
+			"editor.formatOnPaste": false,
+			"editor.defaultFormatter": "ms-python.black-formatter"
+		},
+		"python.formatting.provider": "none"
 	},
 }

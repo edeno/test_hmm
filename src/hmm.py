@@ -1,219 +1,241 @@
+import jax
+import jax.numpy as jnp
 import numpy as np
+from patsy import DesignInfo, DesignMatrix, build_design_matrices
 from scipy.optimize import minimize
-from scipy.special import logit, softmax
-from scipy.stats import poisson
+from scipy.special import softmax
+
+EPS = 1e-15
 
 
-def get_likelihood(emission_matrix, observations_ind):
-    return emission_matrix[:, observations_ind].T
+def get_transition_matrix(transition_matrix, t):
+    return transition_matrix[t] if transition_matrix.ndim == 3 else transition_matrix
 
 
-def forward(initial_conditions, log_likelihood, transition_matrix):
-
-    n_states = len(initial_conditions)
-    n_time = len(log_likelihood)
-
-    max_log_likelihood = np.nanmax(log_likelihood, axis=1, keepdims=True)
-    likelihood = np.exp(log_likelihood - max_log_likelihood)
-
-    causal_posterior = np.zeros((n_time, n_states))
-    causal_posterior[0] = initial_conditions * likelihood[0]
-    scaling = np.zeros((n_time,))
-    scaling[0] = causal_posterior[0].sum()
-    causal_posterior[0] /= scaling[0]
-
-    for time_ind in range(1, n_time):
-        causal_posterior[time_ind] = likelihood[time_ind] * (
-            causal_posterior[time_ind - 1] @ transition_matrix
-        )
-        scaling[time_ind] = causal_posterior[time_ind].sum()
-        causal_posterior[time_ind] /= scaling[time_ind]
-
-    # log probability of observations given model
-    data_log_likelihood = np.sum(np.log(scaling) + max_log_likelihood.squeeze())
-
-    return causal_posterior, data_log_likelihood, scaling
-
-
-def correction_smoothing(causal_posterior: np.ndarray, transition_matrix: np.ndarray):
-    n_time, n_states = causal_posterior.shape
-
-    acausal_posterior = np.zeros((n_time, n_states))
-    acausal_posterior[-1] = causal_posterior[-1].copy()
-
-    for time_ind in range(n_time - 2, -1, -1):
-        numerator = transition_matrix * causal_posterior[time_ind][:, np.newaxis]
-        norm = numerator.sum(axis=0)
-        norm = np.where(np.isclose(norm, 0.0), 1.0, norm)
-
-        acausal_posterior[time_ind] = np.sum(
-            numerator * acausal_posterior[time_ind + 1] / norm,
-            axis=1,
-        )
-    return acausal_posterior
-
-
-def backward(
+def forward(
     initial_conditions: np.ndarray,
-    likelihood: np.ndarray,
+    log_likelihood: np.ndarray,
     transition_matrix: np.ndarray,
-    scaling: np.ndarray,
-) -> np.ndarray:
-    """Calculates p(O_{t+1:T} \mid I_t) scaled by p(O_t \mid O_{1:t-1})
-
-    The scaling is from the causal forward algorithm, which keeps it numerically stable.
-    Unlike the forward algorithm, the returned value is not not a probability due to the scaling.
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Causal algorithm for computing the posterior distribution of the hidden states of a switching model
 
     Parameters
     ----------
     initial_conditions : np.ndarray, shape (n_states,)
-    observations_ind : np.ndarray, shape (n_time,)
-    emission_matrix : np.ndarray, shape (n_states, n_states)
-    transition_matrix : np.ndarray, shape (n_states, n_states)
-    scaling : np.ndarray, shape (n_time,)
+    log_likelihood : np.ndarray, shape (n_time, n_states)
+    transition_matrix : np.ndarray, shape (n_states, n_states) or (n_time, n_states, n_states)
 
     Returns
     -------
-    scaled_backward_posterior : np.ndarray
+    causal_posterior : np.ndarray, shape (n_time, n_states)
+        Causal posterior distribution
+    predictive_distribution : np.ndarray, shape (n_time, n_states)
+        One step predictive distribution
+    marginal_likelihood : float
 
     """
-    n_states = len(initial_conditions)
-    n_time = len(likelihood)
+    n_time = log_likelihood.shape[0]
 
-    scaled_backward_posterior = np.zeros((n_time, n_states))
-    scaled_backward_posterior[-1] = 1 / scaling[-1]
+    predictive_distribution = np.zeros_like(log_likelihood)
+    causal_posterior = np.zeros_like(log_likelihood)
+    max_log_likelihood = np.max(log_likelihood, axis=1, keepdims=True)
+    likelihood = np.exp(log_likelihood - max_log_likelihood)
+    likelihood = np.clip(likelihood, a_min=1e-15, a_max=1.0)
 
-    for time_ind in range(n_time - 2, -1, -1):
-        scaled_backward_posterior[time_ind] = transition_matrix @ (
-            likelihood[time_ind + 1] * scaled_backward_posterior[time_ind + 1]
+    predictive_distribution[0] = initial_conditions
+    causal_posterior[0] = initial_conditions * likelihood[0]
+    norm = np.nansum(causal_posterior[0])
+    marginal_likelihood = np.log(norm)
+    causal_posterior[0] /= norm
+
+    for t in range(1, n_time):
+        # Predict
+        predictive_distribution[t] = (
+            get_transition_matrix(transition_matrix, t).T @ causal_posterior[t - 1]
         )
+        # Update
+        causal_posterior[t] = predictive_distribution[t] * likelihood[t]
+        # Normalize
+        norm = np.nansum(causal_posterior[t])
+        marginal_likelihood += np.log(norm)
+        causal_posterior[t] /= norm
 
-        scaled_backward_posterior[time_ind] /= scaling[time_ind]
+    marginal_likelihood += np.sum(max_log_likelihood)
 
-    return scaled_backward_posterior
+    return causal_posterior, predictive_distribution, marginal_likelihood
 
 
-def get_acausal_posterior_from_parallel_smoothing(
-    causal_posterior, scaled_backward_posterior
-):
-    acausal_posterior = causal_posterior * scaled_backward_posterior
-    acausal_posterior /= acausal_posterior.sum(axis=1, keepdims=True)
+def smoother(
+    causal_posterior: np.ndarray,
+    predictive_distribution: np.ndarray,
+    transition_matrix: np.ndarray,
+) -> np.ndarray:
+    """Acausal algorithm for computing the posterior distribution of the hidden states of a switching model
+
+    Parameters
+    ----------
+    causal_posterior : np.ndarray, shape (n_time, n_states)
+    predictive_distribution : np.ndarray, shape (n_time, n_states)
+        One step predictive distribution
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+
+    Returns
+    -------
+    acausal_posterior, np.ndarray, shape (n_time, n_states)
+
+    """
+    n_time = causal_posterior.shape[0]
+
+    acausal_posterior = np.zeros_like(causal_posterior)
+    acausal_posterior[-1] = causal_posterior[-1]
+
+    for t in range(n_time - 2, -1, -1):
+        # Handle divide by zero
+        relative_distribution = np.where(
+            np.isclose(predictive_distribution[t + 1], 0.0),
+            0.0,
+            acausal_posterior[t + 1] / predictive_distribution[t + 1],
+        )
+        acausal_posterior[t] = causal_posterior[t] * (
+            get_transition_matrix(transition_matrix, t) @ relative_distribution
+        )
+        acausal_posterior[t] /= acausal_posterior[t].sum()
 
     return acausal_posterior
 
 
-def update_transition_matrix_from_parallel_smoothing(
-    causal_posterior,
-    scaled_backward_posterior,
-    likelihood,
-    transition_matrix,
-):
+def estimate_initial_conditions(acausal_posterior: np.ndarray) -> np.ndarray:
+    """_summary_
 
-    n_time, n_states = causal_posterior.shape
-    xi = np.empty((n_time - 1, n_states, n_states))
+    Parameters
+    ----------
+    acausal_posterior : np.ndarray, shape (n_time, n_states)
+        Acausal posterior distribution
 
-    for from_state in range(n_states):
-        for to_state in range(n_states):
-            xi[:, from_state, to_state] = (
-                causal_posterior[:-1, from_state]
-                * likelihood[1:, to_state]
-                * scaled_backward_posterior[1:, to_state]
-                * transition_matrix[from_state, to_state]
-            )
+    Returns
+    -------
+    initial_conditions : np.ndarray, shape (n_states,)
+        Estimated initial conditions
 
-    xi = xi / xi.sum(axis=(1, 2), keepdims=True)
+    """
+    return acausal_posterior[0]
 
-    summed_xi = xi.sum(axis=0)
 
-    new_transition_matrix = summed_xi / summed_xi.sum(axis=1, keepdims=True)
+def estimate_transition_matrix(
+    causal_posterior: np.ndarray,
+    predictive_distribution: np.ndarray,
+    transition_matrix: np.ndarray,
+    acausal_posterior: np.ndarray,
+) -> np.ndarray:
+    """Estimate the transition matrix
+
+    Parameters
+    ----------
+    causal_posterior : np.ndarray, shape (n_time, n_states)
+        Causal posterior distribution
+    predictive_distribution : np.ndarray, shape (n_time, n_states)
+        One step predictive distribution
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+        Current estimate of the transition matrix
+    acausal_posterior : np.ndarray, shape (n_time, n_states)
+        Acausal posterior distribution
+    Returns
+    -------
+    new_transition_matrix, np.ndarray, shape (n_states, n_states)
+        New estimate of the transition matrix
+
+    """
+    relative_distribution = np.where(
+        np.isclose(predictive_distribution[1:], 0.0),
+        0.0,
+        acausal_posterior[1:] / predictive_distribution[1:],
+    )[:, np.newaxis]
+
+    # p(x_t, x_{t+1} | O_{1:T})
+    joint_distribution = (
+        transition_matrix[np.newaxis]
+        * causal_posterior[:-1, :, np.newaxis]
+        * relative_distribution
+    )
+
+    new_transition_matrix = (
+        joint_distribution.sum(axis=0)
+        / acausal_posterior[:-1].sum(axis=0, keepdims=True).T
+    )
+
+    new_transition_matrix /= new_transition_matrix.sum(axis=1, keepdims=True)
 
     return new_transition_matrix
 
 
-def update_transition_matrix_from_correction_smoothing(
-    causal_posterior,
-    acausal_posterior,
-    likelihood,
-    transition_matrix,
-):
-    n_time, n_states = causal_posterior.shape
+def estimate_parameters_via_em(
+    initial_conditions: np.ndarray,
+    log_likelihood: np.ndarray,
+    transition_matrix: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """Use the expectation maximization algorithm to estimate the parameters of a switching model
 
-    # probability of state 1 in time t and state 2 in time t+1
-    xi = np.zeros((n_time - 1, n_states, n_states))
+    Parameters
+    ----------
+    initial_conditions : np.ndarray, shape (n_states,)
+    log_likelihood : np.ndarray, shape (n_time, n_states)
+    transition_matrix : np.ndarray, shape (n_states, n_states)
 
-    for from_state in range(n_states):
-        for to_state in range(n_states):
-            xi[:, from_state, to_state] = (
-                causal_posterior[:-1, from_state]
-                * likelihood[1:, to_state]
-                * acausal_posterior[1:, to_state]
-                * transition_matrix[from_state, to_state]
-                / (causal_posterior[1:, to_state] + np.spacing(1))
-            )
+    Returns
+    -------
+    initial_conditions : np.ndarray, shape (n_states,)
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+    acausal_posterior : np.ndarray, shape (n_time, n_states)
+    marginal_likelihood : float
 
-    xi = xi / xi.sum(axis=(1, 2), keepdims=True)
-
-    summed_xi = xi.sum(axis=0)
-
-    new_transition_matrix = summed_xi / summed_xi.sum(axis=1, keepdims=True)
-
-    return new_transition_matrix
-
-
-def reconstruct_transition(off_diagonal_elements, n_states):
-    """Takes unconstrained off-digaonal transition elements
-    and convert them into probabilities in a transition matrix"""
-
-    new_transition_matrix = np.zeros((n_states, n_states))
-    is_off_diagonal = ~np.identity(n_states, dtype=bool)
-    new_transition_matrix[is_off_diagonal] = off_diagonal_elements
-
-    return softmax(new_transition_matrix, axis=1)
-
-
-def negative_log_likelihood(params, initial_conditions, likelihood):
-    n_states = len(initial_conditions)
-    transition_matrix = reconstruct_transition(
-        params[: n_states * (n_states - 1)], n_states
+    """
+    # Expectation
+    causal_posterior, predictive_distribution, marginal_likelihood = forward(
+        initial_conditions, log_likelihood, transition_matrix
+    )
+    acausal_posterior = smoother(
+        causal_posterior, predictive_distribution, transition_matrix
     )
 
-    _, data_log_likelihood, _ = forward(
-        initial_conditions, likelihood, transition_matrix
+    # Maximization
+    initial_conditions = estimate_initial_conditions(acausal_posterior)
+    transition_matrix = estimate_transition_matrix(
+        causal_posterior,
+        predictive_distribution,
+        transition_matrix,
+        acausal_posterior,
     )
 
-    return -data_log_likelihood
+    return initial_conditions, transition_matrix, acausal_posterior, marginal_likelihood
 
 
-def estimate_transition_matrix_from_gradient_descent(
-    initial_conditions, likelihood, transition_matrix
-):
-    n_states = transition_matrix.shape[0]
-    is_off_diagonal = ~np.identity(n_states, dtype=bool)
+def viterbi(
+    initial_conditions: np.ndarray,
+    log_likelihood: np.ndarray,
+    transition_matrix: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """Calculate the most likely path through the hidden states.
 
-    x0 = np.nan_to_num(logit(transition_matrix[is_off_diagonal]))
-    result = minimize(
-        negative_log_likelihood,
-        x0=x0,
-        args=(initial_conditions, likelihood),
-        method="BFGS",
-    )
+    Parameters
+    ----------
+    initial_conditions : np.ndarray, shape (n_states,)
+    log_likelihood : np.ndarray, shape (n_time, n_states)
+    transition_matrix : np.ndarray, shape (n_states, n_states)
 
-    transition_matrix = reconstruct_transition(result.x, n_states)
+    Returns
+    -------
+    most_likely_path : np.ndarray, shape (n_time,)
+    path_probability : float
+    """
 
-    return transition_matrix, result
+    EPS = 1e-15
+    n_time, n_states = log_likelihood.shape
 
+    log_state_transition = np.log(np.clip(transition_matrix, a_min=EPS, a_max=1.0))
+    log_initial_conditions = np.log(np.clip(initial_conditions, a_min=EPS, a_max=1.0))
 
-def viterbi(initial_conditions, likelihood, transition_matrix):
-
-    LOG_EPS = 1e-16
-    n_time, n_states = likelihood.shape
-
-    log_likelihood = np.log(likelihood + LOG_EPS)
-    log_state_transition = np.log(transition_matrix + LOG_EPS)
-    log_initial_conditions = np.log(initial_conditions + LOG_EPS)
-
-    path_log_prob = np.ones_like(likelihood)
-    back_pointer = np.zeros_like(likelihood, dtype=int)
+    path_log_prob = np.ones_like(log_likelihood)
+    back_pointer = np.zeros_like(log_likelihood, dtype=int)
 
     path_log_prob[0] = log_initial_conditions + log_likelihood[0]
 
@@ -236,7 +258,108 @@ def viterbi(initial_conditions, likelihood, transition_matrix):
     return best_path, np.exp(np.max(path_log_prob[-1]))
 
 
-def check_converged(loglik, previous_loglik, tolerance=1e-4):
+def hmm_information_criterion(
+    log_likelihood: float, n_states: int, n_independent_parameters: int, n_time: int = 1
+) -> tuple[float, float]:
+    """Calculate the information criterion for a hidden Markov model
+
+    Parameters
+    ----------
+    log_likelihood : float
+    n_states : int
+    n_independent_parameters : int
+    n_time : int, optional
+
+    Returns
+    -------
+    aic : float
+    bic : float
+
+    """
+    n_parameters = n_states**2 + n_independent_parameters * n_states - 1
+    aic = -2 * log_likelihood + 2 * n_parameters
+    bic = -2 * log_likelihood + n_parameters * np.log(n_time)
+
+    return aic, bic
+
+
+def centered_softmax_forward(y):
+    """`softmax(x) = exp(x-c) / sum(exp(x-c))` where c is the last coordinate
+
+    Example
+    -------
+    > y = np.log([2, 3, 4])
+    > np.allclose(centered_softmax_forward(y), [0.2, 0.3, 0.4, 0.1])
+    """
+    if y.ndim == 1:
+        y = np.append(y, 0)
+    else:
+        y = np.column_stack((y, np.zeros((y.shape[0],))))
+
+    return softmax(y, axis=-1)
+
+
+def centered_softmax_inverse(y):
+    """`softmax(x) = exp(x-c) / sum(exp(x-c))` where c is the last coordinate
+
+    Example
+    -------
+    > y = np.asarray([0.2, 0.3, 0.4, 0.1])
+    > np.allclose(np.exp(centered_softmax_inverse(y)), np.asarray([2,3,4]))
+    """
+    return np.log(y[..., :-1]) - np.log(y[..., [-1]])
+
+
+def make_spline_predict_matrix(
+    design_info: DesignInfo, place_bin_centers: np.ndarray
+) -> DesignMatrix:
+    """Make a design matrix for position bins
+
+    Parameters
+    ----------
+    design_info : DesignInfo
+    place_bin_centers : np.ndarray, shape (n_place_bins,)
+        The center of each place bin
+    """
+    predict_data = {}
+    predict_data[f"x"] = place_bin_centers
+
+    return build_design_matrices([design_info], predict_data)[0]
+
+
+def fit_poisson_regression(design_matrix, weights, spikes, l2_penalty=0.0):
+    @jax.jit
+    def neglogp(
+        coefficients, spikes=spikes, design_matrix=design_matrix, weights=weights
+    ):
+        conditional_intensity = jnp.exp(design_matrix @ coefficients)
+        conditional_intensity = jnp.clip(conditional_intensity, a_min=EPS, a_max=None)
+        negative_log_likelihood = -1.0 * jnp.mean(
+            weights * jax.scipy.stats.poisson.logpmf(spikes, conditional_intensity)
+        )
+        l2_penalty_term = l2_penalty * jnp.sum(coefficients[1:] ** 2)
+        return negative_log_likelihood + l2_penalty_term
+
+    dlike = jax.grad(neglogp)
+
+    initial_condition = np.array([np.log(np.average(spikes, weights=weights))])
+    initial_condition = np.concatenate(
+        [initial_condition, np.zeros(design_matrix.shape[1] - 1)]
+    )
+
+    res = minimize(
+        neglogp,
+        x0=initial_condition,
+        method="BFGS",
+        jac=dlike,
+    )
+
+    return res.x
+
+
+def check_converged(
+    loglik: float, previous_loglik: float, tolerance: float = 1e-4
+) -> tuple[bool, bool]:
     """
     We have converged if the slope of the log-likelihood function falls below 'threshold',
     i.e., |f(t) - f(t-1)| / avg < threshold,
@@ -254,15 +377,55 @@ def check_converged(loglik, previous_loglik, tolerance=1e-4):
     return is_converged, is_increasing
 
 
-def poisson_log_likelihood(spikes, rate):
-    return poisson.logpmf(spikes, mu=rate + np.spacing(1))
+@jax.jit
+def jax_forward(
+    initial_conditions: jnp.ndarray,
+    log_likelihood: jnp.ndarray,
+    transition_matrix: jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray, float]:
+    """Causal algorithm for computing the posterior distribution of the hidden states of a switching model
 
+    Parameters
+    ----------
+    initial_conditions : np.ndarray, shape (n_states,)
+    log_likelihood : np.ndarray, shape (n_time, n_states)
+    transition_matrix : np.ndarray, shape (n_states, n_states) or (n_time, n_states, n_states)
 
-def hmm_information_criterion(
-    log_likelihood, n_states, n_independent_parameters, n_time=1
-):
-    n_parameters = n_states**2 + n_independent_parameters * n_states - 1
-    aic = -2 * log_likelihood + 2 * n_parameters
-    bic = -2 * log_likelihood + n_parameters * np.log(n_time)
+    Returns
+    -------
+    causal_posterior : np.ndarray, shape (n_time, n_states)
+        Causal posterior distribution
+    predictive_distribution : np.ndarray, shape (n_time, n_states)
+        One step predictive distribution
+    marginal_likelihood : float
 
-    return aic, bic
+    """
+    n_time = log_likelihood.shape[0]
+
+    predictive_distribution = jnp.zeros_like(log_likelihood)
+    causal_posterior = jnp.zeros_like(log_likelihood)
+    max_log_likelihood = jnp.max(log_likelihood, axis=1, keepdims=True)
+    likelihood = jnp.exp(log_likelihood - max_log_likelihood)
+    likelihood = jnp.clip(likelihood, a_min=1e-15, a_max=1.0)
+
+    predictive_distribution.at[0].set(initial_conditions)
+    causal_posterior.at[0].set(initial_conditions * likelihood[0])
+    norm = jnp.nansum(causal_posterior[0])
+    marginal_likelihood = jnp.log(norm)
+    causal_posterior.at[0].set(causal_posterior[0] / norm)
+
+    for t in range(1, n_time):
+        # Predict
+        predictive_distribution.at[t].set(
+            get_transition_matrix(transition_matrix, t).T @ causal_posterior[t - 1]
+        )
+        # Update
+        causal_posterior.at[t].set(predictive_distribution[t] * likelihood[t])
+        # Normalize
+        norm = jnp.nansum(causal_posterior[t])
+        marginal_likelihood += jnp.log(norm)
+        causal_posterior.at[t].set(norm)
+
+    marginal_likelihood += jnp.sum(max_log_likelihood)
+
+    return causal_posterior, predictive_distribution, marginal_likelihood
