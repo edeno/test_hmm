@@ -347,6 +347,7 @@ def make_simulated_data():
 
     spikes = simulate_poisson_spikes(place_fields, sampling_frequency).T
 
+    # Add replays
     n_neurons = spikes.shape[1]
     n_samples_between_spikes = 20
     is_toward = np.array([0, 1], dtype=bool)
@@ -366,5 +367,17 @@ def make_simulated_data():
             neuron_order,
         )
         spikes[replay_ind] = 1
+
+    # No spike scenario
+    spikes[(time > 45) & (time < 47)] = 0.0
+
+    # Fragmented replay scenario
+    start_time, end_time = ripple_times[1]
+    is_ripple_time = (time >= start_time) & (time <= end_time)
+    spikes[is_ripple_time] = 0
+    spike_time_ind = np.nonzero(is_ripple_time)[0]
+    spike_time_ind = spike_time_ind[[1, 21, 31, 41, 51, 61, 71, 81, 91, 101, 111, 121]]
+    neuron_ind = [0, 5, 1, 5, 6, 5, 3, 0, 5, 1, 5, 6]
+    spikes[(spike_time_ind, neuron_ind)] = 1
 
     return (speed, linear_distance, spikes, time, ripple_times, sampling_frequency)
