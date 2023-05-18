@@ -1,5 +1,8 @@
 import numpy as np
 
+TRACK_HEIGHT = 170
+SAMPLING_FREQUENCY = 1500
+
 
 def generate_data():
     initial_conditions = np.asarray([0.2, 0.8])
@@ -306,9 +309,75 @@ def simulate_linear_distance_with_pauses(
     return pause_linear_distance[: time.size]
 
 
-def make_simulated_data():
-    track_height = 170
-    sampling_frequency = 1500
+def make_continuous_replay(
+    n_neurons: int = 8,
+    n_samples_between_spikes: int = 20,
+    is_outbound: bool = True,
+) -> np.ndarray:
+    """Make a simulated continuous replay.
+
+    Parameters
+    ----------
+    sampling_frequency : int, optional
+        Samples per second
+    track_height : float, optional
+        Height of the simulated track
+    running_speed : float, optional
+        Speed of the simulated animal
+    place_field_means : np.ndarray, optional
+        Location of the center of the Gaussian place fields.
+    replay_speedup : int, optional
+        _description_, by default REPLAY_SPEEDUP
+    is_outbound : bool, optional
+        _description_, by default True
+
+    Returns
+    -------
+    test_spikes : np.ndarray, shape (n_time, n_neurons)
+        Binned spike indicator. 1 means spike occured. 0 means no spike occured.
+
+    """
+    neuron_order = (
+        np.flip(np.arange(n_neurons), axis=0) if is_outbound else np.arange(n_neurons)
+    )
+    spike_time_ind = np.arange(
+        0, n_neurons * n_samples_between_spikes, n_samples_between_spikes
+    )
+    spikes = np.zeros((spike_time_ind.max() + 1, n_neurons))
+    spikes[(spike_time_ind, neuron_order)] = 1
+
+    return spikes
+
+
+def make_fragmented_replay(
+    n_neurons: int = 8,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Make a simulated fragmented replay.
+
+    Parameters
+    ----------
+    place_field_means : np.ndarray, optional
+        _description_, by default PLACE_FIELD_MEANS
+    sampling_frequency : int, optional
+        Samples per second
+
+    Returns
+    -------
+    test_spikes : np.ndarray, shape (n_time, n_neurons)
+        Binned spike indicator. 1 means spike occured. 0 means no spike occured.
+
+    """
+    spike_time_ind = np.array([1, 21, 31, 41, 51, 61, 71, 81, 91, 101, 111, 121])
+    neuron_ind = np.array([0, 5, 1, 5, 6, 5, 3, 0, 5, 1, 5, 6])
+    test_spikes = np.zeros((spike_time_ind.max() + 1, n_neurons))
+    test_spikes[(spike_time_ind, neuron_ind)] = 1.0
+
+    return test_spikes
+
+
+def make_simulated_data(
+    track_height: float = TRACK_HEIGHT, sampling_frequency: int = SAMPLING_FREQUENCY
+):
     n_samples = sampling_frequency * 65
 
     time = simulate_time(n_samples, sampling_frequency)
@@ -348,36 +417,42 @@ def make_simulated_data():
     spikes = simulate_poisson_spikes(place_fields, sampling_frequency).T
 
     # Add replays
-    n_neurons = spikes.shape[1]
-    n_samples_between_spikes = 20
-    is_toward = np.array([0, 1], dtype=bool)
 
-    for (start_time, end_time), flip in zip(ripple_times[[0, -1]], is_toward):
-        is_ripple_time = (time >= start_time) & (time <= end_time)
-        ripple_ind = np.nonzero(is_ripple_time)[0]
-        spikes[is_ripple_time] = 0
-        neuron_order = (
-            np.flip(np.arange(n_neurons), axis=0) if flip else np.arange(n_neurons)
-        )
-        replay_ind = (
-            ripple_ind[0]
-            + np.arange(
-                0, n_neurons * n_samples_between_spikes, n_samples_between_spikes
-            ),
-            neuron_order,
-        )
-        spikes[replay_ind] = 1
+    # Ripple 1
+    start_time, end_time = ripple_times[0]
+    is_ripple_time = (time >= start_time) & (time <= end_time)
+    ripple_ind = np.nonzero(is_ripple_time)[0]
+    spikes[is_ripple_time] = 0
+    ripple1_spikes = make_continuous_replay(
+        n_neurons=spikes.shape[1],
+        n_samples_between_spikes=20,
+        is_outbound=True,
+    )
+    spikes[ripple_ind[: ripple1_spikes.shape[0]]] = ripple1_spikes
+
+    # Ripple 2
+    start_time, end_time = ripple_times[1]
+    is_ripple_time = (time >= start_time) & (time <= end_time)
+    ripple_ind = np.nonzero(is_ripple_time)[0]
+    spikes[is_ripple_time] = 0
+    ripple2_spikes = make_fragmented_replay(
+        n_neurons=spikes.shape[1],
+    )
+    spikes[ripple_ind[: ripple2_spikes.shape[0]]] = ripple2_spikes
+
+    # Ripple 3
+    start_time, end_time = ripple_times[2]
+    is_ripple_time = (time >= start_time) & (time <= end_time)
+    ripple_ind = np.nonzero(is_ripple_time)[0]
+    spikes[is_ripple_time] = 0
+    ripple3_spikes = make_continuous_replay(
+        n_neurons=spikes.shape[1],
+        n_samples_between_spikes=20,
+        is_outbound=False,
+    )
+    spikes[ripple_ind[: ripple3_spikes.shape[0]]] = ripple3_spikes
 
     # No spike scenario
     spikes[(time > 45) & (time < 47)] = 0.0
-
-    # Fragmented replay scenario
-    start_time, end_time = ripple_times[1]
-    is_ripple_time = (time >= start_time) & (time <= end_time)
-    spikes[is_ripple_time] = 0
-    spike_time_ind = np.nonzero(is_ripple_time)[0]
-    spike_time_ind = spike_time_ind[[1, 21, 31, 41, 51, 61, 71, 81, 91, 101, 111, 121]]
-    neuron_ind = [0, 5, 1, 5, 6, 5, 3, 0, 5, 1, 5, 6]
-    spikes[(spike_time_ind, neuron_ind)] = 1
 
     return (speed, linear_distance, spikes, time, ripple_times, sampling_frequency)
