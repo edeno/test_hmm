@@ -1143,6 +1143,7 @@ def fit_switching_model(
         discrete_transition_coefficients,
         discrete_transition_design_matrix,
         non_local_rates,
+        log_likelihood,
         *debug,
     )
 
