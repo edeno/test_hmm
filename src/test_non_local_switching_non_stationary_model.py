@@ -636,11 +636,16 @@ def setup_nonlocal_switching_model(
     n_env_bins = env.place_bin_centers_.shape[0]
 
     if include_no_spike_state:
-        state_names = ["local", "no_spike", "non-local"]
-        bin_sizes = [1, 1, n_env_bins]
+        state_names = [
+            "local",
+            "no_spike",
+            "non-local continuous",
+            "non-local fragmented",
+        ]
+        bin_sizes = [1, 1, n_env_bins, n_env_bins]
     else:
-        state_names = ["local", "non-local"]
-        bin_sizes = [1, n_env_bins]
+        state_names = ["local", "non-local continuous", "non-local fragmented"]
+        bin_sizes = [1, n_env_bins, n_env_bins]
 
     n_states = len(state_names)
 
@@ -716,7 +721,13 @@ def setup_nonlocal_switching_model(
                 if from_state != to_state:
                     continuous_state_transitions[inds] = uniform
                 else:
-                    continuous_state_transitions[inds] = random_walk
+                    if (
+                        state_names[from_state] == "non-local continuous"
+                        or state_names[from_state] == "non-local"
+                    ):
+                        continuous_state_transitions[inds] = random_walk
+                    elif state_names[from_state] == "non-local fragmented":
+                        continuous_state_transitions[inds] = uniform
 
     # Don't fit the place fields on ripples
     is_training = ~is_ripple
@@ -954,7 +965,7 @@ def fit_switching_model(
         local_rates = []
         non_local_rates = []
 
-    include_no_spike_state = n_states == 3
+    include_no_spike_state = n_states > 3
 
     if include_no_spike_state:
         log_likelihood[:, state_ind == 1] = np.sum(
@@ -992,6 +1003,7 @@ def fit_switching_model(
                 non_local_rate = np.clip(non_local_rate, a_min=EPS, a_max=None)
                 non_local_rates.append(non_local_rate)
                 if include_no_spike_state:
+                    # continuous
                     log_likelihood[:, state_ind == 2] += scipy.stats.poisson.logpmf(
                         neuron_spikes[:, np.newaxis], non_local_rate[np.newaxis]
                     )
@@ -999,6 +1011,7 @@ def fit_switching_model(
                         :, ~env.is_track_interior_
                     ] = np.nan
                 else:
+                    # continuous
                     log_likelihood[:, state_ind == 1] += scipy.stats.poisson.logpmf(
                         neuron_spikes[:, np.newaxis], non_local_rate[np.newaxis]
                     )
@@ -1006,6 +1019,10 @@ def fit_switching_model(
                         :, ~env.is_track_interior_
                     ] = np.nan
 
+            if include_no_spike_state:
+                log_likelihood[:, state_ind == 3] = log_likelihood[:, state_ind == 2]
+            else:
+                log_likelihood[:, state_ind == 2] = log_likelihood[:, state_ind == 1]
             coefficients = np.stack(coefficients, axis=1)
             local_rates = np.stack(local_rates, axis=1)
             non_local_rates = np.stack(non_local_rates, axis=1)
@@ -1177,11 +1194,23 @@ def plot_switching_model(
     axes[1].legend(h, state_names)
 
     n_states = len(state_names)
-    if n_states == 3:
+    if n_states == 4:
         axes[2].pcolormesh(
             t,
             x,
-            acausal_posterior[time_slice, state_ind == 2].T,
+            (
+                acausal_posterior[time_slice, state_ind == 2]
+                + acausal_posterior[time_slice, state_ind == 3]
+            ).T,
+            vmin=0.0,
+            vmax=0.01,
+            cmap="bone_r",
+        )
+    elif n_states == 3:
+        axes[2].pcolormesh(
+            t,
+            x,
+            (acausal_posterior[time_slice, state_ind == 2]).T,
             vmin=0.0,
             vmax=0.01,
             cmap="bone_r",
