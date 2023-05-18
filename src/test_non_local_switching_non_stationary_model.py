@@ -583,7 +583,6 @@ def setup_nonlocal_switching_model(
     emission_knot_spacing: float = 8.0,
     no_spike_rate: float = 1e-10,
     is_stationary_discrete_transition: bool = False,
-    is_no_spike_transition_constant: bool = True,
     include_no_spike_state: bool = True,
 ) -> tuple[
     np.ndarray,
@@ -677,13 +676,6 @@ def setup_nonlocal_switching_model(
         speed_knots=speed_knots,
         is_stationary=is_stationary_discrete_transition,
     )
-
-    if is_no_spike_transition_constant:
-        # Fix no_spike transition to be constant
-        if discrete_state_transitions.ndim == 2:
-            discrete_state_transitions[1] = NO_SPIKE_TRANSITIONS
-        else:
-            discrete_state_transitions[:, 1] = NO_SPIKE_TRANSITIONS
 
     if not include_no_spike_state:
         discrete_state_transitions = np.delete(discrete_state_transitions, 1, axis=-1)
@@ -1084,9 +1076,6 @@ def fit_switching_model(
                     stickiness=stickiness,
                     transition_regularization=transition_regularization,
                 )
-                if is_no_spike_transition_constant:
-                    # Fix no_spike transition to be constant
-                    discrete_state_transitions[:, 1] = NO_SPIKE_TRANSITIONS
 
             else:
                 discrete_state_transitions = estimate_stationary_state_transition(
@@ -1097,10 +1086,6 @@ def fit_switching_model(
                     concentration=concentration,
                     stickiness=stickiness,
                 )
-
-                # Fix no_spike transition to be constant
-                if is_no_spike_transition_constant:
-                    discrete_state_transitions[1] = NO_SPIKE_TRANSITIONS
 
         if fit_likelihood:
             is_training = acausal_posterior[:, 0]
