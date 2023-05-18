@@ -523,7 +523,12 @@ def estimate_initial_discrete_transition4(
     speed_knots: None | np.ndarray = None,
     is_stationary: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    state_names = ["local", "no_spike", "non_local"]
+    state_names = [
+        "local",
+        "no_spike",
+        "non-local continuous",
+        "non-local fragmented",
+    ]
     n_states = len(state_names)
 
     if is_stationary:
