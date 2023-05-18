@@ -584,6 +584,7 @@ def setup_nonlocal_switching_model(
     no_spike_rate: float = 1e-10,
     is_stationary_discrete_transition: bool = False,
     include_no_spike_state: bool = True,
+    rw_movement_var=6.0,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -629,7 +630,7 @@ def setup_nonlocal_switching_model(
     state_names : list[str]
     """
 
-    random_walk = RandomWalk().make_state_transition([env])
+    random_walk = RandomWalk(movement_var=rw_movement_var).make_state_transition([env])
     uniform = Uniform().make_state_transition([env])
 
     n_env_bins = env.place_bin_centers_.shape[0]
