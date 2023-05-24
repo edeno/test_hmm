@@ -874,6 +874,67 @@ def smoother(
     return acausal_posterior
 
 
+def viterbi(
+    initial_conditions: np.ndarray,
+    log_likelihood: np.ndarray,
+    state_ind: np.ndarray,
+    continuous_state_transitions: np.ndarray,
+    discrete_state_transitions: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """Calculate the most likely path through the hidden states.
+
+    Parameters
+    ----------
+    initial_conditions : np.ndarray, shape (n_states,)
+    log_likelihood : np.ndarray, shape (n_time, n_states)
+    transition_matrix : np.ndarray, shape (n_states, n_states)
+
+    Returns
+    -------
+    most_likely_path : np.ndarray, shape (n_time,)
+    path_probability : float
+    """
+
+    EPS = 1e-15
+    n_time, n_states = log_likelihood.shape
+
+    log_initial_conditions = np.log(np.clip(initial_conditions, a_min=EPS, a_max=1.0))
+
+    path_log_prob = np.ones_like(log_likelihood)
+    back_pointer = np.zeros_like(log_likelihood, dtype=int)
+
+    path_log_prob[0] = log_initial_conditions + log_likelihood[0]
+
+    for time_ind in range(1, n_time):
+        prior = path_log_prob[time_ind - 1] + np.log(
+            np.clip(
+                get_transition_matrix(
+                    continuous_state_transitions,
+                    discrete_state_transitions,
+                    state_ind,
+                    time_ind,
+                ),
+                a_min=EPS,
+                a_max=1.0,
+            )
+        )
+        for state_idx in range(n_states):
+            back_pointer[time_ind, state_idx] = np.argmax(prior[state_idx])
+            path_log_prob[time_ind, state_idx] = (
+                prior[state_idx, back_pointer[time_ind, state_idx]]
+                + log_likelihood[time_ind, state_idx]
+            )
+
+    # Find the best accumulated path prob in the last time bin
+    # and then trace back the best path
+    best_path = np.zeros((n_time,), dtype=int)
+    best_path[-1] = np.argmax(path_log_prob[-1])
+    for time_ind in range(n_time - 2, -1, -1):
+        best_path[time_ind] = back_pointer[time_ind + 1, best_path[time_ind + 1]]
+
+    return best_path, np.exp(np.max(path_log_prob[-1]))
+
+
 def fit_switching_model(
     spikes,
     emission_design_matrix,
@@ -1116,10 +1177,16 @@ def fit_switching_model(
         else:
             print(f"iteration {n_iter}, " f"likelihood: {marginal_log_likelihoods[-1]}")
 
+    print("Estimating predicted state")
     # predicted_state = viterbi(
-    #     initial_conditions, np.exp(log_likelihood), transition_matrix
+    #     initial_conditions,
+    #     log_likelihood,
+    #     state_ind,
+    #     continuous_state_transitions,
+    #     discrete_state_transitions,
     # )[0]
     predicted_state = np.full((n_time,), np.nan)
+    print("Done")
 
     debug = (
         (
