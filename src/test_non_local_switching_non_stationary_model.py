@@ -892,7 +892,6 @@ def fit_switching_model(
     fit_likelihood=False,
     fit_inital_conditions=False,
     fit_discrete_transition=True,
-    is_no_spike_transition_constant=True,
     concentration: float = 1.0,
     stickiness: float = 0.0,
     transition_regularization: float = 1e-5,
