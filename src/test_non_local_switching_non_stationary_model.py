@@ -1167,7 +1167,14 @@ def plot_switching_model(
     if time_slice is None:
         time_slice = slice(0, len(time))
 
-    _, axes = plt.subplots(4, 1, sharex=True, constrained_layout=True, figsize=figsize)
+    _, axes = plt.subplots(
+        4,
+        1,
+        sharex=True,
+        constrained_layout=True,
+        figsize=figsize,
+        gridspec_kw={"height_ratios": [2, 1, 3, 1]},
+    )
 
     sliced_time = time[time_slice]
 
@@ -1179,8 +1186,12 @@ def plot_switching_model(
     spike_time_ind, neuron_ind = np.nonzero(spikes[time_slice][:, neuron_sort_ind])
 
     axes[0].scatter(sliced_time[spike_time_ind], neuron_ind, s=1)
+    axes[0].set_ylabel("Neuron")
+
     h = axes[1].plot(sliced_time, acausal_state_probabilities[time_slice])
     axes[1].legend(h, state_names)
+    axes[1].set_ylabel("Probability")
+    axes[1].set_ylim((0.0, 1.05))
 
     n_states = len(state_names)
     if n_states == 4:
@@ -1214,8 +1225,11 @@ def plot_switching_model(
             cmap="bone_r",
         )
     axes[2].scatter(sliced_time, position[time_slice], s=1, color="magenta", zorder=2)
+    axes[2].set_ylabel("Position [cm]")
     axes[3].fill_between(sliced_time, speed[time_slice], color="lightgrey", zorder=2)
+    axes[3].set_ylabel("Speed [cm / s]")
     plt.xlim((sliced_time.min(), sliced_time.max()))
+    plt.xlabel("Time [ms]")
 
 
 def non_local_state_density(acausal_posterior, state_ind, non_local_state_ind=2):
