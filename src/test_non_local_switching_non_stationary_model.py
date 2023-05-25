@@ -1323,7 +1323,10 @@ def plot_likelihood_ratio(
 
     conditional_non_local_acausal_posterior = (
         acausal_posterior[time_slice, state_ind == 2]
-        / acausal_state_probabilities[time_slice, [2]]
+        + acausal_posterior[time_slice, state_ind == 3]
+    ) / (
+        acausal_state_probabilities[time_slice, [2]]
+        + acausal_state_probabilities[time_slice, [3]]
     )
     conditional_non_local_acausal_posterior[:, ~env.is_track_interior_] = np.nan
 
