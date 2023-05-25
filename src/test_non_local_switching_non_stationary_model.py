@@ -532,14 +532,14 @@ def estimate_initial_discrete_transition4(
     n_states = len(state_names)
 
     if is_stationary:
-        diag = np.array([0.999, 0.99, 0.98, 0.98])
+        diag = np.array([0.933, 0.933, 0.933, 0.933])
 
         discrete_state_transitions = make_transition_from_diag(diag)
 
         discrete_transition_coefficients = None
         discrete_transition_design_matrix = None
     else:
-        immobility_diag = np.array([0.999, 0.99, 0.98, 0.98])
+        immobility_diag = np.array([0.933, 0.933, 0.933, 0.933])
         discrete_state_transitions_immobility = make_transition_from_diag(
             immobility_diag
         )
