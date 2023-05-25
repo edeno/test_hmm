@@ -1253,6 +1253,15 @@ def plot_switching_model(
     )
     spike_time_ind, neuron_ind = np.nonzero(spikes[time_slice][:, neuron_sort_ind])
 
+    conditional_non_local_acausal_posterior = (
+        acausal_posterior[time_slice, state_ind == 2]
+        + acausal_posterior[time_slice, state_ind == 3]
+    ) / (
+        acausal_state_probabilities[time_slice, [2]]
+        + acausal_state_probabilities[time_slice, [3]]
+    )
+    conditional_non_local_acausal_posterior[:, ~env.is_track_interior_] = np.nan
+
     axes[0].scatter(sliced_time[spike_time_ind], neuron_ind, s=1)
     axes[0].set_ylabel("Neuron")
 
@@ -1262,36 +1271,14 @@ def plot_switching_model(
     axes[1].set_ylim((0.0, 1.05))
 
     n_states = len(state_names)
-    if n_states == 4:
-        axes[2].pcolormesh(
-            t,
-            x,
-            (
-                acausal_posterior[time_slice, state_ind == 2]
-                + acausal_posterior[time_slice, state_ind == 3]
-            ).T,
-            vmin=0.0,
-            vmax=0.01,
-            cmap="bone_r",
-        )
-    elif n_states == 3:
-        axes[2].pcolormesh(
-            t,
-            x,
-            (acausal_posterior[time_slice, state_ind == 2]).T,
-            vmin=0.0,
-            vmax=0.01,
-            cmap="bone_r",
-        )
-    elif n_states == 2:
-        axes[2].pcolormesh(
-            t,
-            x,
-            acausal_posterior[time_slice, state_ind == 1].T,
-            vmin=0.0,
-            vmax=0.01,
-            cmap="bone_r",
-        )
+    axes[2].pcolormesh(
+        t,
+        x,
+        conditional_non_local_acausal_posterior.T,
+        vmin=0.0,
+        vmax=0.25,
+        cmap="bone_r",
+    )
     axes[2].scatter(sliced_time, position[time_slice], s=1, color="magenta", zorder=2)
     axes[2].set_ylabel("Position [cm]")
     axes[3].fill_between(sliced_time, speed[time_slice], color="lightgrey", zorder=2)
