@@ -1055,6 +1055,7 @@ def fit_switching_model(
                 )[:, np.newaxis]
 
                 non_local_rate = np.exp(emission_predict_matrix @ coef)
+                non_local_rate[~env.is_track_interior_] = EPS
                 non_local_rate = np.clip(non_local_rate, a_min=EPS, a_max=None)
                 non_local_rates.append(non_local_rate)
                 if include_no_spike_state:
@@ -1081,6 +1082,7 @@ def fit_switching_model(
             coefficients = np.stack(coefficients, axis=1)
             local_rates = np.stack(local_rates, axis=1)
             non_local_rates = np.stack(non_local_rates, axis=1)
+            non_local_rates[~env.is_track_interior_, :] = np.nan
 
         coefficients_iter.append(coefficients)
         local_rates_iter.append(local_rates)
@@ -1240,7 +1242,7 @@ def plot_switching_model(
     t, x = np.meshgrid(sliced_time, env.place_bin_centers_)
 
     neuron_sort_ind = np.argsort(
-        env.place_bin_centers_[non_local_rates.argmax(axis=0)].squeeze()
+        env.place_bin_centers_[np.nanargmax(non_local_rates, axis=0)].squeeze()
     )
     spike_time_ind, neuron_ind = np.nonzero(spikes[time_slice][:, neuron_sort_ind])
 
@@ -1331,7 +1333,7 @@ def plot_likelihood_ratio(
     conditional_non_local_acausal_posterior[:, ~env.is_track_interior_] = np.nan
 
     neuron_place_bin = env.place_bin_centers_[
-        np.argmax(non_local_rates, axis=0)
+        np.nanargmax(non_local_rates, axis=0)
     ].squeeze()
 
     t, x = np.meshgrid(time[time_slice], env.place_bin_centers_)
