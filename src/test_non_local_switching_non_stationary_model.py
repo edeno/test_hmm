@@ -1229,6 +1229,7 @@ def plot_switching_model(
     state_names,
     figsize=(20, 5),
     time_slice=None,
+    posterior_max=0.25,
 ):
     if time_slice is None:
         time_slice = slice(0, len(time))
@@ -1274,7 +1275,7 @@ def plot_switching_model(
         x,
         conditional_non_local_acausal_posterior.T,
         vmin=0.0,
-        vmax=0.25,
+        vmax=posterior_max,
         cmap="bone_r",
     )
     axes[2].scatter(sliced_time, position[time_slice], s=1, color="magenta", zorder=2)
@@ -1308,6 +1309,7 @@ def plot_likelihood_ratio(
     state_ind,
     state_names,
     figsize=(10, 10),
+    posterior_max=0.25,
 ):
     likelihood = np.exp(log_likelihood[time_slice, state_ind == 2])
     spike_time_ind, neuron_ind = np.nonzero(spikes[time_slice, :])
@@ -1363,7 +1365,12 @@ def plot_likelihood_ratio(
     cmap = copy.deepcopy(plt.get_cmap("bone_r"))
     cmap.set_bad(color="lightgrey")
     h = axes[1].pcolormesh(
-        t, x, conditional_non_local_acausal_posterior.T, cmap=cmap, vmin=0.0, vmax=0.5
+        t,
+        x,
+        conditional_non_local_acausal_posterior.T,
+        cmap=cmap,
+        vmin=0.0,
+        vmax=posterior_max,
     )
     plt.colorbar(h, ax=axes[1])
     axes[1].scatter(time[time_slice], position[time_slice], color="magenta", s=1)
