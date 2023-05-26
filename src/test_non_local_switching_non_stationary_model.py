@@ -532,17 +532,15 @@ def estimate_initial_discrete_transition4(
     n_states = len(state_names)
 
     if is_stationary:
-        diag = np.array([0.933, 0.933, 0.933, 0.933])
+        diag = np.array([0.90, 0.90, 0.90, 0.98])
 
         discrete_state_transitions = make_transition_from_diag(diag)
 
         discrete_transition_coefficients = None
         discrete_transition_design_matrix = None
     else:
-        immobility_diag = np.array([0.933, 0.933, 0.933, 0.933])
-        discrete_state_transitions_immobility = make_transition_from_diag(
-            immobility_diag
-        )
+        diag = np.array([0.90, 0.90, 0.90, 0.98])
+        discrete_state_transitions = make_transition_from_diag(diag)
 
         if speed_knots is None:
             speed_knots = [1.0, 4.0, 16.0, 32.0, 64.0]
@@ -557,12 +555,12 @@ def estimate_initial_discrete_transition4(
             (n_coefficients, n_states, n_states - 1)
         )
         discrete_transition_coefficients[0] = centered_softmax_inverse(
-            discrete_state_transitions_immobility
+            discrete_state_transitions
         )
 
-        discrete_state_transitions = discrete_state_transitions_immobility[
-            np.newaxis
-        ] * np.ones((n_time, n_states, n_states))
+        discrete_state_transitions = discrete_state_transitions[np.newaxis] * np.ones(
+            (n_time, n_states, n_states)
+        )
 
     return (
         discrete_state_transitions,
